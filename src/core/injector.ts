@@ -276,6 +276,17 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
         container.appendChild(el);
         document.body.appendChild(container);
 
+        // Resize handler: Reload iframe on window resize
+        if (el.tagName === 'IFRAME') {
+             let resizeTimeout;
+             window.addEventListener('resize', () => {
+                 clearTimeout(resizeTimeout);
+                 resizeTimeout = setTimeout(() => {
+                     el.src = el.src;
+                 }, 500);
+             });
+        }
+
         try {
             ${customJs}
         } catch (e) { console.error("Custom JS Error:", e); }
