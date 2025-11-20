@@ -33,9 +33,20 @@
     <div class="input-group">
         <label>Wallpaper ID</label>
         <div class="input-row">
-            <input type="text" id="wpIdInput" placeholder="e.g. 1625455159" value="1625455159">
+            <input type="text" id="wpIdInput" placeholder="e.g. 1858166341" value="1858166341">
             <button class="go" onclick="loadById()">GO</button>
         </div>
+        <div id="pathStatus" style="font-size: 10px; color: #aaa; margin-top: 5px; word-break: break-all; max-height: 100px; overflow-y: auto;"></div>
+    </div>
+
+    <div class="input-group">
+        <label>Audio Source</label>
+        <select id="audioSource" style="width:100%; background:#3c3c3c; color:white; border:1px solid #555; padding:2px;">
+            <option value="simulate">Simulate (Sine Wave)</option>
+            <option value="mic">Microphone (Real Audio)</option>
+            <option value="system">System Audio (Screen Share)</option>
+            <option value="off">Off (Silence)</option>
+        </select>
     </div>
 
     <div class="content" id="propsPanel">
@@ -48,10 +59,24 @@
 </div>
 
 <script>
+    window.onerror = function(msg, url, line, col, error) {
+        const panel = document.getElementById('propsPanel');
+        if (panel) {
+            const errDiv = document.createElement('div');
+            errDiv.style.color = 'red';
+            errDiv.style.fontSize = '11px';
+            errDiv.style.padding = '5px';
+            errDiv.style.borderBottom = '1px solid #555';
+            errDiv.innerText = `Global Error: ${msg}`;
+            panel.prepend(errDiv);
+        }
+        return false;
+    };
+
     const frame = document.getElementById('wpFrame');
     const panel = document.getElementById('propsPanel');
     const idInput = document.getElementById('wpIdInput');
-    const SERVER_ROOT = 'http://127.0.0.1:23333';
+    const SERVER_ROOT = 'http://127.0.0.1:33333';
 
     // 回车自动加载
     idInput.addEventListener('keydown', (e) => { if(e.key === 'Enter') loadById(); });
@@ -76,6 +101,19 @@
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Server Error");
             console.log("Server Path:", data.fullPath);
+
+            const statusDiv = document.getElementById('pathStatus');
+            if (statusDiv) {
+                let html = `<div><strong>Main:</strong> ${data.fullPath.split('\\').pop()}</div>`;
+                if (data.searchPaths && data.searchPaths.length > 1) {
+                    html += `<div><strong>Deps:</strong></div>`;
+                    data.searchPaths.slice(1).forEach(p => {
+                        html += `<div style="padding-left:10px;">- ${p.split('\\').pop()}</div>`;
+                    });
+                }
+                statusDiv.innerHTML = html;
+                statusDiv.title = JSON.stringify(data.searchPaths, null, 2);
+            }
         } catch (e) {
             panel.innerHTML = `<span style="color:red">Error: ${e.message}<br>Check Server Config</span>`;
             return;
@@ -105,12 +143,13 @@
         const apiScript = await apiRes.text();
 
         const baseTag = `<base href="${SERVER_ROOT}/" />`;
+        const jqueryTag = `<script src="https://code.jquery.com/jquery-3.6.0.min.js"><\/script>`;
         const scriptTag = `<script>${apiScript}<\/script>`;
 
         if (html.includes('<head>')) {
-            html = html.replace('<head>', `<head>${baseTag}${scriptTag}`);
+            html = html.replace('<head>', `<head>${baseTag}${jqueryTag}${scriptTag}`);
         } else {
-            html = `${baseTag}${scriptTag}${html}`;
+            html = `${baseTag}${jqueryTag}${scriptTag}${html}`;
         }
 
         frame.srcdoc = html;
@@ -131,21 +170,23 @@
     let currentProps = {};
     
     function syncAllProps() {
-        // WE 格式: { key: { value: val } }
-        const weFormatted = {};
-        for (let key in currentProps) {
-            weFormatted[key] = { value: currentProps[key] };
-        }
-        post({ type: 'UPDATE_PROPERTIES', data: weFormatted });
+        const payload = {};
+        Object.keys(currentProps).forEach(k => {
+            payload[k] = { value: currentProps[k] };
+        });
+        post({ type: 'PROPERTIES', data: payload });
     }
 
     function updateProp(key, val) {
         currentProps[key] = val;
-        syncAllProps();
+        const payload = {};
+        payload[key] = { value: val };
+        post({ type: 'PROPERTIES', data: payload });
     }
 
     function getSafeValue(p) {
         if (p.value !== undefined && p.value !== null) return p.value;
+        if (p.default !== undefined && p.default !== null) return p.default;
         if (p.type === 'color') return "1 1 1";
         if (p.type === 'slider') return p.min || 0;
         if (p.type === 'bool') return false;
@@ -224,6 +265,12 @@
                     input.appendChild(o);
                 });
                 input.onchange = (e) => updateProp(key, e.target.value);
+            } else {
+                // Fallback for text, file, directory, etc.
+                input = document.createElement('input');
+                input.type = 'text';
+                input.value = safeVal;
+                input.onchange = (e) => updateProp(key, e.target.value);
             }
 
             if (input) {
@@ -233,17 +280,92 @@
         });
     }
 
+    let audioContext;
+    let analyser;
+    let dataArray;
+    let micStream;
+
+    async function initMic() {
+        if (audioContext) return;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            micStream = stream;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 128; 
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+        } catch (e) {
+            console.error("Mic Error:", e);
+            alert("Microphone access denied or error: " + e.message);
+            document.getElementById('audioSource').value = 'simulate';
+        }
+    }
+
+    async function initSystemAudio() {
+        if (audioContext) return;
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            micStream = stream;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 128; 
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            stream.getVideoTracks()[0].onended = () => {
+                stopMic();
+                document.getElementById('audioSource').value = 'simulate';
+            };
+        } catch (e) {
+            console.error("System Audio Error:", e);
+            alert("System Audio access denied or error: " + e.message);
+            document.getElementById('audioSource').value = 'simulate';
+        }
+    }
+
+    function stopMic() {
+        if (micStream) {
+            micStream.getTracks().forEach(t => t.stop());
+            micStream = null;
+        }
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+    }
+
+    document.getElementById('audioSource').addEventListener('change', (e) => {
+        stopMic();
+        if (e.target.value === 'mic') initMic();
+        else if (e.target.value === 'system') initSystemAudio();
+    });
+
     function startAudio() {
         setInterval(() => {
-            const audioData = new Array(128);
-            const t = Date.now() / 1000;
-            for(let i=0; i<64; i++) {
-                let v = Math.max(0, Math.sin(i*0.1 + t*10) * 0.8);
-                v *= (1 - i/64);
-                v += Math.random() * 0.2; 
-                audioData[i] = Math.min(1, v);
-                audioData[i+64] = Math.min(1, v);
+            const mode = document.getElementById('audioSource').value;
+            const audioData = new Array(128).fill(0);
+            
+            if (mode === 'simulate') {
+                const t = Date.now() / 1000;
+                for(let i=0; i<64; i++) {
+                    let v = Math.max(0, Math.sin(i*0.1 + t*10) * 0.8);
+                    v *= (1 - i/64);
+                    v += Math.random() * 0.2; 
+                    audioData[i] = Math.min(1, v);
+                    audioData[i+64] = Math.min(1, v);
+                }
+            } else if ((mode === 'mic' || mode === 'system') && analyser) {
+                analyser.getByteFrequencyData(dataArray);
+                for(let i=0; i<64; i++) {
+                    const v = dataArray[i] / 255.0;
+                    audioData[i] = v; 
+                    audioData[i+64] = v; 
+                }
             }
+            
             post({ type: 'AUDIO_TICK', data: audioData });
         }, 33);
     }
