@@ -9,15 +9,44 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "*"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "vscode-wallpaper-engine.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "vscode-wallpaper-engine.setWallpaper",
+        "title": "Set Wallpaper: 设置壁纸"
+      },
+      {
+        "command": "vscode-wallpaper-engine.openInBrowser",
+        "title": "Open Wallpaper in Browser: 在浏览器打开"
+      },
+      {
+        "command": "vscode-wallpaper-engine.uninstallWallpaper",
+        "title": "Uninstall Wallpaper Engine: 卸载插件"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "VSCode Wallpaper Engine",
+      "properties": {
+        "vscode-wallpaper-engine.workshopPath": {
+          "type": "string",
+          "default": "",
+          "description": "Wallpaper Engine 创意工坊目录路径 (例如: D:/Steam/steamapps/workshop/content/431960)"
+        },
+        "vscode-wallpaper-engine.backgroundOpacity": {
+          "type": "number",
+          "default": 0.1,
+          "description": "代码编辑器的背景透明度 (0 - 1)"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
@@ -34,15 +63,18 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.106.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "typescript-eslint": "^8.46.3",
-    "eslint": "^9.39.1",
+    "@types/vscode": "^1.106.1",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
     "esbuild": "^0.27.0",
+    "eslint": "^9.39.1",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.9.3",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "typescript-eslint": "^8.46.3"
+  },
+  "dependencies": {
+    "sudo-prompt": "^9.2.1"
   }
 }
