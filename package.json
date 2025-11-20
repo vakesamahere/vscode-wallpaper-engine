@@ -24,6 +24,10 @@
         "title": "Set Wallpaper: 设置壁纸"
       },
       {
+        "command": "vscode-wallpaper-engine.openInBrowser",
+        "title": "Open Wallpaper in Browser: 在浏览器打开"
+      },
+      {
         "command": "vscode-wallpaper-engine.uninstallWallpaper",
         "title": "Uninstall Wallpaper Engine: 卸载插件"
       }

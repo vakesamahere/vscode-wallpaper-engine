@@ -7,6 +7,7 @@ import { scanWallpapers } from './core/scanner';
 import { performInjection, restoreWorkbench } from './core/injector';
 import { WallpaperServer } from './core/server';
 import { WallpaperType } from './core/types';
+import { WALLPAPER_SERVER_PORT } from './config/constants';
 
 // test
 import modifyDom from './playground/modify_dom';
@@ -77,6 +78,12 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 	context.subscriptions.push(setWallPaperCmd);
+
+    const openInBrowserCmd = vscode.commands.registerCommand('vscode-wallpaper-engine.openInBrowser', async () => {
+        const url = `http://127.0.0.1:${WALLPAPER_SERVER_PORT}/index.html`;
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+    });
+    context.subscriptions.push(openInBrowserCmd);
 
     const uninstallCmd = vscode.commands.registerCommand('vscode-wallpaper-engine.uninstallWallpaper', async () => {
         const confirm = await vscode.window.showWarningMessage(
