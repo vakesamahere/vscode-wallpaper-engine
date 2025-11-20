@@ -16,20 +16,24 @@ export class WallpaperItem implements vscode.QuickPickItem {
         this.dirPath = dirPath;
     }
 
-    getMediaPath(): { path: string, isVideo: boolean } {
+    getMediaPath(): { path: string, type: 'video' | 'image' | 'web' } {
         let mainFile = this.detail;
-        let isVideo = false;
+        let type: 'video' | 'image' | 'web' = 'image';
         let finalPath = path.join(this.dirPath, mainFile);
 
         if (mainFile.match(/\.(mp4|webm)$/i)) {
-            isVideo = true;
+            type = 'video';
+        } else if (mainFile.match(/\.html$/i)) {
+            // [新增] 识别 HTML
+            type = 'web';
         } else if (!mainFile.match(/\.(jpg|jpeg|png)$/i)) {
+            // 降级逻辑
             const preview = path.join(this.dirPath, 'preview.jpg');
             if (fs.existsSync(preview)) {
                 finalPath = preview;
             }
         }
-        return { path: finalPath, isVideo };
+        return { path: finalPath, type };
     }
 }
 

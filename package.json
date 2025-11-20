@@ -18,8 +18,12 @@
         "title": "Hello World"
       },
       {
-        "command": "vscode-wallpaper-engine.installWallpaper",
-        "title": "Wallpaper Engine: 设置壁纸"
+        "command": "vscode-wallpaper-engine.setWallpaper",
+        "title": "Set Wallpaper: 设置壁纸"
+      },
+      {
+        "command": "vscode-wallpaper-engine.uninstallWallpaper",
+        "title": "Uninstall Wallpaper Engine: 卸载插件"
       }
     ],
     "configuration": {

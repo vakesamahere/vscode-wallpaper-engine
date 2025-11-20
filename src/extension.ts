@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import { getConfiguration, validateConfig } from './config';
 import { scanWallpapers } from './core/scanner';
-import { performInjection } from './core/injector';
+import { performInjection, restoreWorkbench } from './core/injector';
 
 // test
 import modifyDom from './playground/modify_dom';
@@ -25,12 +25,12 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(disposable);
 
 	// command to set wallpaper
-	const setWallPaperCmd = vscode.commands.registerCommand('vscode-wallpaper-engine.installWallpaper', async () => {
+	const setWallPaperCmd = vscode.commands.registerCommand('vscode-wallpaper-engine.setWallpaper', async () => {
         // 1. 配置
         const config = getConfiguration();
         if (!validateConfig(config)) {
-					return;
-				}
+            return;
+        }
 
         // 2. 扫描
         vscode.window.withProgress({
@@ -54,12 +54,24 @@ export function activate(context: vscode.ExtensionContext) {
 
             if (selected) {
                 // 4. 核心操作
-                const { path, isVideo } = selected.getMediaPath();
-                await performInjection(path, isVideo, config.opacity);
+                const { path, type } = selected.getMediaPath();
+                await performInjection(path, type, config.opacity);
             }
         });
     });
 	context.subscriptions.push(setWallPaperCmd);
+
+    const uninstallCmd = vscode.commands.registerCommand('vscode-wallpaper-engine.uninstallWallpaper', async () => {
+        const confirm = await vscode.window.showWarningMessage(
+            '确定要卸载 Wallpaper Engine 插件吗？这将移除所有注入的代码和修改。',
+            { modal: true },
+            '卸载'
+        );
+        if (confirm === '卸载') {
+            await restoreWorkbench();
+        }
+    });
+    context.subscriptions.push(uninstallCmd);
 }
 
 // This method is called when your extension is deactivated
