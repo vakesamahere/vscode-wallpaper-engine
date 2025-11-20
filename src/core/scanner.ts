@@ -50,9 +50,9 @@ export function scanWallpapers(workshopPath: string): WallpaperItem[] {
                 
                 // 过滤类型
                 let type: WallpaperType | null = null;
-                if (rawType === 'video') type = WallpaperType.Video;
-                else if (rawType === 'image') type = WallpaperType.Image;
-                else if (rawType === 'web') type = WallpaperType.Web;
+                if (rawType === 'video') { type = WallpaperType.Video; }
+                else if (rawType === 'image') { type = WallpaperType.Image; }
+                else if (rawType === 'web') { type = WallpaperType.Web; }
 
                 if (json.file && type) {
                     items.push(new WallpaperItem(
