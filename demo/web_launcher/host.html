@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WE ID Launcher</title>
+    <style>
+        body { margin: 0; display: flex; height: 100vh; background: #1e1e1e; color: #ccc; font-family: Consolas, monospace; overflow: hidden; }
+        #sidebar { width: 300px; background: #252526; border-right: 1px solid #333; display: flex; flex-direction: column; }
+        #preview { flex: 1; position: relative; background: #000; }
+        iframe { width: 100%; height: 100%; border: none; display: block; }
+        
+        .header { padding: 15px; background: #333; font-weight: bold; border-bottom: 1px solid #444; }
+        .content { padding: 15px; overflow-y: auto; flex: 1; }
+        
+        .input-group { padding: 10px; border-bottom: 1px solid #444; background: #2d2d2d; }
+        .input-group label { display: block; font-size: 11px; color: #888; margin-bottom: 5px; }
+        .input-row { display: flex; gap: 5px; }
+        input[type="text"] { flex: 1; padding: 5px; background: #1e1e1e; border: 1px solid #555; color: white; font-family: monospace; }
+        button.go { padding: 5px 10px; background: #007acc; color: white; border: none; cursor: pointer; }
+        button.go:hover { background: #0062a3; }
+
+        .control-item { margin-bottom: 15px; }
+        label.prop-label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+        input[type="range"], input[type="color"], select { width: 100%; background: #3c3c3c; border: 1px solid #555; color: white; }
+        span.val { float: right; font-size: 11px; color: #007acc; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div class="header">WE Debugger</div>
+    
+    <div class="input-group">
+        <label>Wallpaper ID</label>
+        <div class="input-row">
+            <input type="text" id="wpIdInput" placeholder="e.g. 1625455159" value="1625455159">
+            <button class="go" onclick="loadById()">GO</button>
+        </div>
+    </div>
+
+    <div class="content" id="propsPanel">
+        <div style="color:#666; text-align:center; margin-top:20px;">Waiting for ID...</div>
+    </div>
+</div>
+
+<div id="preview">
+    <iframe id="wpFrame"></iframe>
+</div>
+
+<script>
+    const frame = document.getElementById('wpFrame');
+    const panel = document.getElementById('propsPanel');
+    const idInput = document.getElementById('wpIdInput');
+    const SERVER_ROOT = 'http://127.0.0.1:23333';
+
+    // 回车自动加载
+    idInput.addEventListener('keydown', (e) => { if(e.key === 'Enter') loadById(); });
+    // 自动加载默认值
+    window.onload = loadById;
+
+    async function loadById() {
+        const id = idInput.value.trim();
+        if (!id) return;
+
+        console.clear();
+        console.log(`Loading ID: ${id}...`);
+        panel.innerHTML = "Loading config...";
+
+        // 1. 告诉服务器切换 ID
+        try {
+            const res = await fetch(`${SERVER_ROOT}/api/set-id`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Server Error");
+            console.log("Server Path:", data.fullPath);
+        } catch (e) {
+            panel.innerHTML = `<span style="color:red">Error: ${e.message}<br>Check Server Config</span>`;
+            return;
+        }
+
+        // 2. 加载 project.json
+        try {
+            const res = await fetch(`${SERVER_ROOT}/project.json`);
+            if (!res.ok) throw new Error("project.json missing");
+            const json = await res.json();
+            renderUI(json);
+        } catch (e) {
+            console.error(e);
+            panel.innerHTML = `<span style="color:orange">No project.json found.<br>Is the ID correct?</span>`;
+            // 即使没有 json，也尝试加载 html
+        }
+
+        // 3. 注入并加载
+        loadIframe();
+    }
+
+    async function loadIframe() {
+        const htmlRes = await fetch(`${SERVER_ROOT}/index.html`);
+        let html = await htmlRes.text();
+        
+        const apiRes = await fetch(`${SERVER_ROOT}/mock-api.js`);
+        const apiScript = await apiRes.text();
+
+        const baseTag = `<base href="${SERVER_ROOT}/" />`;
+        const scriptTag = `<script>${apiScript}<\/script>`;
+
+        if (html.includes('<head>')) {
+            html = html.replace('<head>', `<head>${baseTag}${scriptTag}`);
+        } else {
+            html = `${baseTag}${scriptTag}${html}`;
+        }
+
+        frame.srcdoc = html;
+
+        frame.onload = () => {
+            post({ type: 'INIT_GENERAL' });
+            syncAllProps();
+            startAudio();
+        };
+    }
+
+    // --- 下面是通用的 Helper / UI / Audio 逻辑 (与之前相同) ---
+
+    function post(msg) {
+        if (frame.contentWindow) frame.contentWindow.postMessage(msg, '*');
+    }
+
+    let currentProps = {};
+    
+    function syncAllProps() {
+        // WE 格式: { key: { value: val } }
+        const weFormatted = {};
+        for (let key in currentProps) {
+            weFormatted[key] = { value: currentProps[key] };
+        }
+        post({ type: 'UPDATE_PROPERTIES', data: weFormatted });
+    }
+
+    function updateProp(key, val) {
+        currentProps[key] = val;
+        syncAllProps();
+    }
+
+    function getSafeValue(p) {
+        if (p.value !== undefined && p.value !== null) return p.value;
+        if (p.type === 'color') return "1 1 1";
+        if (p.type === 'slider') return p.min || 0;
+        if (p.type === 'bool') return false;
+        if (p.type === 'combo') return p.options?.[0]?.value || "";
+        return "";
+    }
+
+    function weColorToHex(str) {
+        if (!str || typeof str !== 'string') return '#ffffff';
+        const parts = str.split(' ').map(parseFloat);
+        if (parts.length < 3) return '#ffffff';
+        const toHex = (n) => {
+            const hex = Math.floor(Math.min(1,Math.max(0,n)) * 255).toString(16);
+            return hex.length === 1 ? '0' + hex : hex;
+        };
+        return '#' + toHex(parts[0]) + toHex(parts[1]) + toHex(parts[2]);
+    }
+
+    function renderUI(json) {
+        panel.innerHTML = '';
+        currentProps = {}; 
+        const props = json.properties || (json.general && json.general.properties) || {};
+        
+        Object.keys(props).forEach(key => {
+            const p = props[key];
+            const safeVal = getSafeValue(p);
+            currentProps[key] = safeVal;
+
+            const div = document.createElement('div');
+            div.className = 'control-item';
+            const lbl = document.createElement('label');
+            lbl.className = 'prop-label';
+            lbl.innerText = `${p.text || key}`;
+            div.appendChild(lbl);
+
+            let input;
+            if (p.type === 'slider') {
+                const valSpan = document.createElement('span');
+                valSpan.className = 'val';
+                valSpan.innerText = safeVal;
+                lbl.appendChild(valSpan);
+                input = document.createElement('input');
+                input.type = 'range';
+                input.min = p.min ?? 0; input.max = p.max ?? 100; input.step = p.step ?? 1;
+                input.value = safeVal;
+                input.oninput = (e) => {
+                    let v = parseFloat(e.target.value);
+                    if (p.step % 1 !== 0) v = parseFloat(v.toFixed(2));
+                    valSpan.innerText = v;
+                    updateProp(key, v);
+                };
+            } else if (p.type === 'color') {
+                input = document.createElement('input');
+                input.type = 'color';
+                input.value = weColorToHex(safeVal);
+                input.oninput = (e) => {
+                    const h = e.target.value;
+                    const r = parseInt(h.substr(1,2), 16)/255;
+                    const g = parseInt(h.substr(3,2), 16)/255;
+                    const b = parseInt(h.substr(5,2), 16)/255;
+                    updateProp(key, `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)}`);
+                };
+            } else if (p.type === 'bool') {
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.style.width = 'auto';
+                input.checked = safeVal;
+                input.onchange = (e) => updateProp(key, e.target.checked);
+            } else if (p.type === 'combo') {
+                input = document.createElement('select');
+                (p.options || []).forEach(opt => {
+                    const o = document.createElement('option');
+                    o.value = opt.value;
+                    o.innerText = opt.label;
+                    if (opt.value == safeVal) o.selected = true;
+                    input.appendChild(o);
+                });
+                input.onchange = (e) => updateProp(key, e.target.value);
+            }
+
+            if (input) {
+                div.appendChild(input);
+                panel.appendChild(div);
+            }
+        });
+    }
+
+    function startAudio() {
+        setInterval(() => {
+            const audioData = new Array(128);
+            const t = Date.now() / 1000;
+            for(let i=0; i<64; i++) {
+                let v = Math.max(0, Math.sin(i*0.1 + t*10) * 0.8);
+                v *= (1 - i/64);
+                v += Math.random() * 0.2; 
+                audioData[i] = Math.min(1, v);
+                audioData[i+64] = Math.min(1, v);
+            }
+            post({ type: 'AUDIO_TICK', data: audioData });
+        }, 33);
+    }
+</script>
+</body>
+</html>
