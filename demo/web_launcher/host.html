@@ -135,25 +135,10 @@
         loadIframe();
     }
 
-    async function loadIframe() {
-        const htmlRes = await fetch(`${SERVER_ROOT}/index.html`);
-        let html = await htmlRes.text();
+    function loadIframe() {
+        // Use server-side injection instead of srcdoc
+        frame.src = `${SERVER_ROOT}/index.html`;
         
-        const apiRes = await fetch(`${SERVER_ROOT}/mock-api.js`);
-        const apiScript = await apiRes.text();
-
-        const baseTag = `<base href="${SERVER_ROOT}/" />`;
-        const jqueryTag = `<script src="https://code.jquery.com/jquery-3.6.0.min.js"><\/script>`;
-        const scriptTag = `<script>${apiScript}<\/script>`;
-
-        if (html.includes('<head>')) {
-            html = html.replace('<head>', `<head>${baseTag}${jqueryTag}${scriptTag}`);
-        } else {
-            html = `${baseTag}${jqueryTag}${scriptTag}${html}`;
-        }
-
-        frame.srcdoc = html;
-
         frame.onload = () => {
             post({ type: 'INIT_GENERAL' });
             syncAllProps();

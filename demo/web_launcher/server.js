@@ -398,6 +398,36 @@ function serveFile(res, filePath, sourceName, data) {
     console.log(`✅ [200] ${path.basename(filePath)} [${sourceName}]`);
   }
 
+  // Patch HTML files to inject mock-api.js
+  if (ext === ".html" && sourceName !== "DEMO") {
+    if (!data) {
+      try {
+        data = fs.readFileSync(filePath);
+      } catch (e) {
+        res.writeHead(500);
+        res.end("Read Error");
+        return;
+      }
+    }
+    let content = data.toString("utf-8");
+    const injection = `
+    <!-- WE-Mock Injection -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.13.6/underscore-min.js"></script>
+    <script src="/mock-api.js"></script>
+    <!-- End Injection -->
+    `;
+
+    if (content.includes("<head>")) {
+      content = content.replace("<head>", "<head>" + injection);
+    } else if (content.includes("<body>")) {
+      content = content.replace("<body>", "<body>" + injection);
+    } else {
+      content = injection + content;
+    }
+    data = Buffer.from(content, "utf-8");
+  }
+
   // Patch JS files to fix file:/// issue
   if (ext === ".js") {
     if (!data) {
