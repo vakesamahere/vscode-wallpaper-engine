@@ -29,7 +29,7 @@ function getWorkbenchPath(file: 'html' | 'js'): string | null {
     const filename = file === 'html' ? 'workbench.html' : 'workbench.desktop.main.js';
     for (const basePath of basePaths) {
         const fullPath = path.join(basePath, filename);
-        if (fs.existsSync(fullPath)) return fullPath;
+        if (fs.existsSync(fullPath)) { return fullPath; }
     }
     return null;
 }
@@ -98,14 +98,14 @@ export async function restoreWorkbench() {
  */
 async function patchWorkbenchHtml() {
     const targetHtml = getWorkbenchPath('html');
-    if (!targetHtml) return;
+    if (!targetHtml) { return; }
 
     let html = fs.readFileSync(targetHtml, 'utf-8');
-    if (html.includes(ATTR_RENAMED)) return;
+    if (html.includes(ATTR_RENAMED)) { return; }
 
     const metaTagRegex = /<meta[\s\S\n]*?http-equiv="Content-Security-Policy"[\s\S\n]*?>/i;
     const match = html.match(metaTagRegex);
-    if (!match) return;
+    if (!match) { return; }
 
     const originalTag = match[0];
     const disabledTag = originalTag.replace(ATTR_ORIGINAL, ATTR_RENAMED);
@@ -135,7 +135,7 @@ ${CSP_MARKER_END}
 }
 async function injectJs(mediaPath: string, type: WallpaperType, opacity: number) {
     const jsPath = getWorkbenchPath('js');
-    if (!jsPath) return;
+    if (!jsPath) { return; }
     
     let elementCreationCode = '';
 

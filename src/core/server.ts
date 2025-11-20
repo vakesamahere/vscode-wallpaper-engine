@@ -98,7 +98,7 @@ export class WallpaperServer {
     }
 
     private startWatchdog() {
-        if (this.retryInterval) clearInterval(this.retryInterval);
+        if (this.retryInterval) { clearInterval(this.retryInterval); }
         console.log('[Server] Watchdog started. Waiting for port to be free...');
         
         this.retryInterval = setInterval(() => {
@@ -112,7 +112,7 @@ export class WallpaperServer {
                 // 连接失败，说明主服务器可能挂了
                 console.log('[Server] Primary server unreachable. Attempting to take over...');
                 // 停止 watchdog，尝试启动服务器
-                if (this.retryInterval) clearInterval(this.retryInterval);
+                if (this.retryInterval) { clearInterval(this.retryInterval); }
                 this.retryInterval = null;
                 this.start(this.currentRoot, true);
             });
