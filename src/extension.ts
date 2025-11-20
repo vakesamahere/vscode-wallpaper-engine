@@ -34,7 +34,9 @@ export function activate(context: vscode.ExtensionContext) {
         if (e.affectsConfiguration('vscode-wallpaper-engine.wallpaperId') ||
             e.affectsConfiguration('vscode-wallpaper-engine.backgroundOpacity') ||
             e.affectsConfiguration('vscode-wallpaper-engine.serverPort') ||
-            e.affectsConfiguration('vscode-wallpaper-engine.customJs')) {
+            e.affectsConfiguration('vscode-wallpaper-engine.customJs') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.resizeDelay') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.startupCheckInterval')) {
             
             const config = getConfiguration();
             if (!config.wallpaperId || !config.workshopPath) { return; }
@@ -49,7 +51,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
 
                 // Don't auto restart, prompt instead
-                await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, false);
+                await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, false);
                 
                 const action = await vscode.window.showInformationMessage('Wallpaper Engine settings changed. Restart to apply?', 'Restart');
                 if (action === 'Restart') {
@@ -112,7 +114,7 @@ export function activate(context: vscode.ExtensionContext) {
                         }
                     }
                     
-                    await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, true);
+                    await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, true);
                 } finally {
                     setTimeout(() => { isSettingWallpaper = false; }, 2000);
                 }

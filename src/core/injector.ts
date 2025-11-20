@@ -132,7 +132,7 @@ ${CSP_MARKER_END}
     html = html.replace(originalTag, injectionBlock);
     await saveFilePrivileged(targetHtml, html);
 }
-async function injectJs(mediaPath: string, type: WallpaperType, opacity: number, port: number, customJs: string) {
+async function injectJs(mediaPath: string, type: WallpaperType, opacity: number, port: number, customJs: string, resizeDelay: number, startupCheckInterval: number) {
     const jsPath = getWorkbenchPath('js');
     if (!jsPath) { return; }
     
@@ -190,7 +190,7 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
             const targetUrl = "${targetUrl}";
             
             async function checkHealthLoop() {
-                await new Promise(resolve => setTimeout(resolve, 300));
+                await new Promise(resolve => setTimeout(resolve, ${startupCheckInterval}));
                 let isHealthy = false;
                 try {
                     const resp = await fetch("${pingUrl}", { method: 'GET', mode: 'no-cors' });
@@ -283,7 +283,7 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
                  clearTimeout(resizeTimeout);
                  resizeTimeout = setTimeout(() => {
                      el.src = el.src;
-                 }, 500);
+                 }, ${resizeDelay});
              });
         }
 
@@ -304,10 +304,10 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
     }
 }
 
-export async function performInjection(mediaPath: string, type: WallpaperType, opacity: number, port: number, customJs: string, autoRestart = true) {
+export async function performInjection(mediaPath: string, type: WallpaperType, opacity: number, port: number, customJs: string, resizeDelay: number, startupCheckInterval: number, autoRestart = true) {
     try {
         await patchWorkbenchHtml();
-        await injectJs(mediaPath, type, opacity, port, customJs);
+        await injectJs(mediaPath, type, opacity, port, customJs, resizeDelay, startupCheckInterval);
         
         if (autoRestart) {
             // 直接重启，无需用户确认

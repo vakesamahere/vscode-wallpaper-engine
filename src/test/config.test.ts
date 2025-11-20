@@ -8,7 +8,9 @@ suite('Config Test Suite', () => {
             opacity: 0.5,
             serverPort: 23333,
             customJs: '',
-            wallpaperId: ''
+            wallpaperId: '',
+            resizeDelay: 500,
+            startupCheckInterval: 300
         };
         const result = validateConfig(config);
         assert.strictEqual(result, false);

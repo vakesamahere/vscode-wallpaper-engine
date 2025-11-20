@@ -55,6 +55,16 @@
           "default": "",
           "description": "当前选中的壁纸 ID (文件夹名称)"
         },
+        "vscode-wallpaper-engine.resizeDelay": {
+          "type": "number",
+          "default": 500,
+          "description": "窗口大小改变后刷新壁纸的延迟时间 (毫秒)"
+        },
+        "vscode-wallpaper-engine.startupCheckInterval": {
+          "type": "number",
+          "default": 300,
+          "description": "启动时检查壁纸服务器状态的间隔时间 (毫秒)"
+        },
         "vscode-wallpaper-engine.customJs": {
           "type": "string",
           "default": "",
