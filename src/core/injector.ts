@@ -125,7 +125,7 @@ async function patchWorkbenchHtml() {
     const injectionBlock = `
 ${disabledTag}
 ${CSP_MARKER_START}
-
+${newTagContent}
 ${CSP_MARKER_END}
 `;
     console.log("应用 CSP 补丁...");

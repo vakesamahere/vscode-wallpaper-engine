@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { WALLPAPER_SERVER_PORT } from '../config/constants';
+import { MOCK_API_SCRIPT, BOOTSTRAP_SCRIPT } from './web-api-mock';
 
 export class WallpaperServer {
     private server: http.Server | null = null;
@@ -66,6 +67,22 @@ export class WallpaperServer {
                 return;
             }
 
+            // [New] Serve Mock API
+            if (reqUrl === '/vscode-wallpaper-engine-mock-api.js') {
+                res.setHeader('Content-Type', 'application/javascript');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.setHeader('Access-Control-Allow-Private-Network', 'true');
+                res.end(MOCK_API_SCRIPT);
+                return;
+            }
+            if (reqUrl === '/vscode-wallpaper-engine-bootstrap.js') {
+                res.setHeader('Content-Type', 'application/javascript');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.setHeader('Access-Control-Allow-Private-Network', 'true');
+                res.end(BOOTSTRAP_SCRIPT);
+                return;
+            }
+
             fs.readFile(filePath, (err, data) => {
                 if (err) {
                     console.warn(`[Server 404] ${reqUrl}`);
@@ -78,7 +95,26 @@ export class WallpaperServer {
                 const mimeType = this.getMimeType(ext);
                 res.setHeader('Content-Type', mimeType);
                 res.setHeader('Access-Control-Allow-Origin', '*'); // 允许跨域
-                res.end(data);
+                res.setHeader('Access-Control-Allow-Private-Network', 'true');
+
+                // [New] Inject scripts into HTML
+                if (ext === '.html') {
+                    let html = data.toString('utf-8');
+                    const injection = `
+<script src="/vscode-wallpaper-engine-mock-api.js"></script>
+<script src="/vscode-wallpaper-engine-bootstrap.js"></script>
+`;
+                    if (html.includes('<head>')) {
+                        html = html.replace('<head>', '<head>' + injection);
+                    } else if (html.includes('<body>')) {
+                        html = html.replace('<body>', '<body>' + injection);
+                    } else {
+                        html = injection + html;
+                    }
+                    res.end(html);
+                } else {
+                    res.end(data);
+                }
             });
         });
 
@@ -158,6 +194,9 @@ export class WallpaperServer {
             '.woff': 'font/woff',
             '.woff2': 'font/woff2',
             '.ttf': 'font/ttf',
+            '.frag': 'text/plain',
+            '.vert': 'text/plain',
+            '.glsl': 'text/plain',
         };
         return map[ext] || 'application/octet-stream';
     }
