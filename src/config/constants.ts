@@ -1,0 +1,2 @@
+
+export const WALLPAPER_SERVER_PORT = 23333;

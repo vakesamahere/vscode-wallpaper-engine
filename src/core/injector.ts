@@ -3,10 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { toVsCodeResourceUrl } from '../utils'; 
 import { saveFilePrivileged } from './admin-saver';
+import { WALLPAPER_SERVER_PORT } from '../config/constants';
+import { WallpaperType } from './types';
 
 // --- 常量定义 ---
-
-// 注入标记
 const JS_INJECTION_REGEX = /\s*\/\* \[VSCode-Wallpaper-Injection-Start\] \*\/[\s\S]*?\/\* \[VSCode-Wallpaper-Injection-End\] \*\//g;
 const HTML_INJECTION_REGEX = /\s*<!-- VSCode-Wallpaper-Injection-Start -->[\s\S\n]*?<!-- VSCode-Wallpaper-Injection-End -->/g;
 
@@ -17,8 +17,8 @@ const CSP_MARKER_END = '<!-- VSCode-Wallpaper-Injection-End -->';
 // 属性重命名策略
 const ATTR_ORIGINAL = 'http-equiv="Content-Security-Policy"';
 const ATTR_RENAMED = 'http-equiv="Content-Security-Policy--replaced-by-wallpaper-engine-plugin"';
+const SERVER_PORT = WALLPAPER_SERVER_PORT;
 
-// 获取 workbench 核心文件路径
 function getWorkbenchPath(file: 'html' | 'js'): string | null {
     const root = vscode.env.appRoot;
     const basePaths = [
@@ -26,9 +26,7 @@ function getWorkbenchPath(file: 'html' | 'js'): string | null {
         path.join(root, 'out', 'vs', 'code', 'electron-sandbox', 'workbench'),
         path.join(root, 'out', 'vs', 'workbench')
     ];
-
     const filename = file === 'html' ? 'workbench.html' : 'workbench.desktop.main.js';
-    
     for (const basePath of basePaths) {
         const fullPath = path.join(basePath, filename);
         if (fs.existsSync(fullPath)) return fullPath;
@@ -103,96 +101,45 @@ async function patchWorkbenchHtml() {
     if (!targetHtml) return;
 
     let html = fs.readFileSync(targetHtml, 'utf-8');
+    if (html.includes(ATTR_RENAMED)) return;
 
-    // 检查是否已经 Patch 过
-    if (html.includes(ATTR_RENAMED)) {
-        return; // 已经重命名过了，无需重复操作
-    }
-
-    // 1. 匹配整个原版 meta 标签
-    // 使用 [\s\S\n]*? 跨行匹配，确保捕获完整的标签
     const metaTagRegex = /<meta[\s\S\n]*?http-equiv="Content-Security-Policy"[\s\S\n]*?>/i;
     const match = html.match(metaTagRegex);
-
-    if (!match) {
-        console.warn("未找到 CSP 标签，无法 Patch");
-        return;
-    }
+    if (!match) return;
 
     const originalTag = match[0];
-
-    // 2. 构造“失效版”标签 (仅重命名属性)
-    // 注意：这里使用字符串替换，只替换 http-equiv 部分
     const disabledTag = originalTag.replace(ATTR_ORIGINAL, ATTR_RENAMED);
 
-    // 3. 构造“新版”标签 (基于原版修改)
     let newTagContent = originalTag;
-    
-    // A. 移除 Trusted Types 限制
     newTagContent = newTagContent.replace(/require-trusted-types-for[\s\S]*?'script'[\s\S]*?;/g, '');
 
-    // B. 注入宽松规则到 content 属性
     const contentRegex = /content="([\s\S]*?)"/i;
     const contentMatch = newTagContent.match(contentRegex);
     
     if (contentMatch) {
         const oldContent = contentMatch[1];
-        // 宽松规则：允许 vscode-file, file, data 等
-        const looseRules = `default-src * 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob:; frame-src * vscode-file: file: data: blob:; script-src * 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob:; `;
+        const looseRules = `default-src * 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https:; connect-src * vscode-file: file: data: blob: http: https:; frame-src * vscode-file: file: data: blob: http: https:; script-src * 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https:; `;
         const newContent = `${looseRules}${oldContent}`;
         newTagContent = newTagContent.replace(contentRegex, `content="${newContent}"`);
     }
 
-    // 4. 组合最终 HTML
-    // 结构: [失效的原标签] + [新标签块]
     const injectionBlock = `
 ${disabledTag}
 ${CSP_MARKER_START}
-${newTagContent}
+
 ${CSP_MARKER_END}
 `;
-
-    console.log("正在应用 HTML Patch (Renaming Strategy)...");
-    
-    // 替换原标签
+    console.log("应用 CSP 补丁...");
     html = html.replace(originalTag, injectionBlock);
-    
     await saveFilePrivileged(targetHtml, html);
 }
-
-// --- JS 注入逻辑 ---
-
-const MOCK_API_SCRIPT = `
-<script>
-(function() {
-    try {
-        window.wallpaperRequestRandomFileForProperty = function() {};
-        window.wallpaperRegisterAudioListener = function() {};
-        window.wallpaperRegisterMediaStatusListener = function() {};
-        window.wallpaperRegisterMediaPropertiesListener = function() {};
-        window.wallpaperRegisterMediaTimelineListener = function() {};
-        window.wallpaperPropertyListener = {
-            applyUserProperties: function(props) {},
-            applyGeneralProperties: function(props) {},
-            setPaused: function(paused) {}
-        };
-        setTimeout(() => {
-            if (window.wallpaperPropertyListener && window.wallpaperPropertyListener.applyGeneralProperties) {
-                window.wallpaperPropertyListener.applyGeneralProperties({ fps: 60 });
-            }
-        }, 500);
-    } catch(e) { console.error("Mock API Error", e); }
-})();
-</script>
-`;
-
-async function injectJs(mediaPath: string, type: 'video'|'image'|'web', opacity: number) {
+async function injectJs(mediaPath: string, type: WallpaperType, opacity: number) {
     const jsPath = getWorkbenchPath('js');
     if (!jsPath) return;
     
     let elementCreationCode = '';
 
-    if (type === 'video') {
+    if (type === WallpaperType.Video) {
         const finalUrl = toVsCodeResourceUrl(mediaPath);
         elementCreationCode = `
             el = document.createElement('video');
@@ -201,31 +148,98 @@ async function injectJs(mediaPath: string, type: 'video'|'image'|'web', opacity:
             el.loop = true;
             el.muted = true;
             el.play();
+            el.style.opacity = '${opacity}';
         `;
-    } else if (type === 'image') {
+    } else if (type === WallpaperType.Image) {
         const finalUrl = toVsCodeResourceUrl(mediaPath);
         elementCreationCode = `
             el = document.createElement('img');
             el.src = "${finalUrl}";
+            el.style.opacity = '${opacity}';
         `;
-    } else if (type === 'web') {
-        let htmlContent = fs.readFileSync(mediaPath, 'utf-8');
-        const dirPath = path.dirname(mediaPath);
-        const baseUrl = toVsCodeResourceUrl(dirPath) + '/';
-        const baseTag = `<base href="${baseUrl}" />`;
+    } else if (type === WallpaperType.Web) {
+        const targetUrl = `http://127.0.0.1:${SERVER_PORT}/index.html`;
+        const pingUrl = `http://127.0.0.1:${SERVER_PORT}/ping`;
         
-        if (htmlContent.includes('<head>')) {
-            htmlContent = htmlContent.replace('<head>', `<head>${baseTag}${MOCK_API_SCRIPT}`);
-        } else {
-            htmlContent = `${baseTag}${MOCK_API_SCRIPT}${htmlContent}`;
-        }
-
-        const safeHtmlString = JSON.stringify(htmlContent);
         elementCreationCode = `
+            // 1. 创建 Loading 元素
+            const loader = document.createElement('div');
+            loader.innerHTML = '<div style="width: 30px; height: 30px; border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid #fff; border-radius: 50%; animation: vscode-wallpaper-spin 1s linear infinite;"></div>';
+            loader.style.position = 'absolute';
+            loader.style.top = '50%';
+            loader.style.left = '50%';
+            loader.style.transform = 'translate(-50%, -50%)';
+            loader.style.zIndex = '100000';
+            
+            // 注入动画样式
+            if (!document.getElementById('vscode-wallpaper-style')) {
+                const style = document.createElement('style');
+                style.id = 'vscode-wallpaper-style';
+                style.textContent = '@keyframes vscode-wallpaper-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+                document.head.appendChild(style);
+            }
+            
+            container.appendChild(loader);
+
+            // 2. 创建 iframe
             el = document.createElement('iframe');
-            el.srcdoc = ${safeHtmlString};
+            el.className = 'vscode-wallpaper-iframe';
             el.frameBorder = '0';
-            el.allow = "autoplay; fullscreen"; 
+            el.allow = "autoplay; fullscreen";
+            el.style.opacity = '0'; // 初始隐藏
+            el.style.transition = 'opacity 0.5s ease-in-out';
+            const targetUrl = "${targetUrl}";
+            
+            async function checkHealthLoop() {
+                await new Promise(resolve => setTimeout(resolve, 300));
+                let isHealthy = false;
+                try {
+                    const resp = await fetch("${pingUrl}", { method: 'GET', mode: 'no-cors' });
+                    isHealthy = true;
+                } catch (e) {
+                    console.warn("Wallpaper Engine: 等待服务器开启...", e);
+                }
+                if (!isHealthy) {
+                    checkHealthLoop();
+                } else {
+                    el.src = targetUrl;
+                    
+                    // 加载完成后显示
+                    el.onload = () => {
+                        el.style.opacity = '${opacity}';
+                        if (loader.parentNode) loader.remove();
+                    };
+                    
+                    // 超时兜底 (3秒)
+                    setTimeout(() => {
+                        if (el.style.opacity === '0') {
+                            el.style.opacity = '${opacity}';
+                            if (loader.parentNode) loader.remove();
+                        }
+                    }, 3000);
+
+                    monitorServer();
+                }
+            }
+
+            async function monitorServer() {
+                while(true) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    try {
+                        await fetch("${pingUrl}", { method: 'GET', mode: 'no-cors' });
+                    } catch(e) {
+                        console.warn("Wallpaper Engine: 服务器断开，重新等待...");
+                        el.style.opacity = '0'; // 隐藏 iframe
+                        // 重新显示 loader? 也可以
+                        container.appendChild(loader);
+                        
+                        el.src = 'about:blank';
+                        checkHealthLoop();
+                        break;
+                    }
+                }
+            }
+            checkHealthLoop();
         `;
     }
 
@@ -245,7 +259,7 @@ async function injectJs(mediaPath: string, type: 'video'|'image'|'web', opacity:
         container.style.height = '100%';
         container.style.zIndex = '99999';
         container.style.pointerEvents = 'none';
-        container.style.opacity = '${opacity}';
+        container.style.opacity = '1';
 
         let el;
         ${elementCreationCode}
@@ -258,7 +272,6 @@ async function injectJs(mediaPath: string, type: 'video'|'image'|'web', opacity:
              el.style.border = 'none';
              el.style.display = 'block';
              el.style.pointerEvents = 'none'; 
-             el.onload = function() { console.log('Wallpaper Loaded'); }
         }
 
         container.appendChild(el);
@@ -270,7 +283,6 @@ async function injectJs(mediaPath: string, type: 'video'|'image'|'web', opacity:
 
     try {
         let raw = fs.readFileSync(jsPath, 'utf-8');
-        // 清理旧注入
         raw = raw.replace(JS_INJECTION_REGEX, '');
         await saveFilePrivileged(jsPath, raw + jsInjection);
     } catch (e) {
@@ -278,24 +290,18 @@ async function injectJs(mediaPath: string, type: 'video'|'image'|'web', opacity:
     }
 }
 
-export async function performInjection(mediaPath: string, type: 'video'|'image'|'web', opacity: number) {
+export async function performInjection(mediaPath: string, type: WallpaperType, opacity: number) {
     try {
-        // 1. Patch HTML
         await patchWorkbenchHtml();
-        
-        // 2. 注入 JS
         await injectJs(mediaPath, type, opacity);
-        
-        const action = await vscode.window.showInformationMessage('注入成功！重启生效。', '立即重启');
-        if (action === '立即重启') {
-            vscode.commands.executeCommand('workbench.action.reloadWindow');
-        }
+        // 直接重启，无需用户确认
+        vscode.window.setStatusBarMessage('Wallpaper installed. Restarting...', 5000);
+        await vscode.commands.executeCommand('workbench.action.reloadWindow');
     } catch (error: any) {
         vscode.window.showErrorMessage(error.message || String(error));
     }
 }
 
-// 辅助函数：正则字符串转义
 function escapeRegExp(string: string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
 }
