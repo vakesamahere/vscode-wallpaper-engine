@@ -10,6 +10,7 @@ export class WallpaperItem implements vscode.QuickPickItem {
     detail: string;
     dirPath: string;
     type: WallpaperType;
+    id: string;
     
     constructor(title: string, id: string, file: string, dirPath: string, type: WallpaperType) {
         this.label = `$(device-camera-video) ${title}`;
@@ -17,6 +18,7 @@ export class WallpaperItem implements vscode.QuickPickItem {
         this.detail = file;
         this.dirPath = dirPath;
         this.type = type;
+        this.id = id;
     }
 
     getMediaPath(): { path: string, type: WallpaperType } {
@@ -67,4 +69,30 @@ export function scanWallpapers(workshopPath: string): WallpaperItem[] {
         }
     }
     return items;
+}
+
+export function getWallpaperById(workshopPath: string, id: string): WallpaperItem | null {
+    const dirPath = path.join(workshopPath, id);
+    const projectJsonPath = path.join(dirPath, 'project.json');
+    if (fs.existsSync(projectJsonPath)) {
+        try {
+            const json = JSON.parse(fs.readFileSync(projectJsonPath, 'utf-8'));
+            const rawType = json.type ? json.type.toLowerCase() : '';
+            let type: WallpaperType | null = null;
+            if (rawType === 'video') { type = WallpaperType.Video; }
+            else if (rawType === 'image') { type = WallpaperType.Image; }
+            else if (rawType === 'web') { type = WallpaperType.Web; }
+
+            if (json.file && type) {
+                return new WallpaperItem(
+                    json.title || '未命名', 
+                    id, 
+                    json.file, 
+                    dirPath,
+                    type
+                );
+            }
+        } catch (e) { }
+    }
+    return null;
 }

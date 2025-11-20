@@ -9,19 +9,23 @@ export class WallpaperServer {
     private currentRoot: string = '';
     private retryInterval: NodeJS.Timeout | null = null;
     // 端口必须与 injector.ts 里的保持一致
-    private readonly PORT = WALLPAPER_SERVER_PORT; 
+    private PORT = WALLPAPER_SERVER_PORT; 
 
     constructor(private context: vscode.ExtensionContext) {
         // 插件启动时，尝试恢复之前的服务器状态
         const lastPath = this.context.globalState.get<string>('currentWallpaperPath');
         if (lastPath && fs.existsSync(lastPath)) {
             console.log(`[Server] Restoring server for: ${lastPath}`);
-            this.start(lastPath, true); // true 表示这是静默启动，不弹窗
+            // 获取配置的端口
+            const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
+            const port = config.get<number>('serverPort') || WALLPAPER_SERVER_PORT;
+            this.start(lastPath, port, true); // true 表示这是静默启动，不弹窗
         }
     }
 
     // [修改] 变成 async，确保状态保存完毕
-    public async start(rootPath: string, silent = false) {
+    public async start(rootPath: string, port: number, silent = false) {
+        this.PORT = port;
         vscode.window.setStatusBarMessage(`Preparing Wallpaper Server...`, 5000);
         // 如果路径没变且服务器开着，跳过
         if (this.server && this.currentRoot === rootPath) {
@@ -114,7 +118,7 @@ export class WallpaperServer {
                 // 停止 watchdog，尝试启动服务器
                 if (this.retryInterval) { clearInterval(this.retryInterval); }
                 this.retryInterval = null;
-                this.start(this.currentRoot, true);
+                this.start(this.currentRoot, this.PORT, true);
             });
             
             // 设置超时，防止请求挂起
