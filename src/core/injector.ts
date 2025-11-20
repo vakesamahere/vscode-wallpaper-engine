@@ -17,7 +17,6 @@ const CSP_MARKER_END = '<!-- VSCode-Wallpaper-Injection-End -->';
 // 属性重命名策略
 const ATTR_ORIGINAL = 'http-equiv="Content-Security-Policy"';
 const ATTR_RENAMED = 'http-equiv="Content-Security-Policy--replaced-by-wallpaper-engine-plugin"';
-const SERVER_PORT = WALLPAPER_SERVER_PORT;
 
 function getWorkbenchPath(file: 'html' | 'js'): string | null {
     const root = vscode.env.appRoot;
@@ -133,7 +132,7 @@ ${CSP_MARKER_END}
     html = html.replace(originalTag, injectionBlock);
     await saveFilePrivileged(targetHtml, html);
 }
-async function injectJs(mediaPath: string, type: WallpaperType, opacity: number) {
+async function injectJs(mediaPath: string, type: WallpaperType, opacity: number, port: number, customJs: string) {
     const jsPath = getWorkbenchPath('js');
     if (!jsPath) { return; }
     
@@ -158,8 +157,8 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number)
             el.style.opacity = '${opacity}';
         `;
     } else if (type === WallpaperType.Web) {
-        const targetUrl = `http://127.0.0.1:${SERVER_PORT}/index.html`;
-        const pingUrl = `http://127.0.0.1:${SERVER_PORT}/ping`;
+        const targetUrl = `http://127.0.0.1:${port}/index.html`;
+        const pingUrl = `http://127.0.0.1:${port}/ping`;
         
         elementCreationCode = `
             // 1. 创建 Loading 元素
@@ -277,6 +276,10 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number)
         container.appendChild(el);
         document.body.appendChild(container);
 
+        try {
+            ${customJs}
+        } catch (e) { console.error("Custom JS Error:", e); }
+
     } catch (e) { console.error("Wallpaper Engine Error:", e); }
 })();
 /* [VSCode-Wallpaper-Injection-End] */`;
@@ -290,13 +293,16 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number)
     }
 }
 
-export async function performInjection(mediaPath: string, type: WallpaperType, opacity: number) {
+export async function performInjection(mediaPath: string, type: WallpaperType, opacity: number, port: number, customJs: string, autoRestart = true) {
     try {
         await patchWorkbenchHtml();
-        await injectJs(mediaPath, type, opacity);
-        // 直接重启，无需用户确认
-        vscode.window.setStatusBarMessage('Wallpaper installed. Restarting...', 5000);
-        await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        await injectJs(mediaPath, type, opacity, port, customJs);
+        
+        if (autoRestart) {
+            // 直接重启，无需用户确认
+            vscode.window.setStatusBarMessage('Wallpaper installed. Restarting...', 5000);
+            await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        }
     } catch (error: any) {
         vscode.window.showErrorMessage(error.message || String(error));
     }

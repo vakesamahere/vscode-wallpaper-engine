@@ -44,6 +44,22 @@
           "type": "number",
           "default": 0.1,
           "description": "代码编辑器的背景透明度 (0 - 1)"
+        },
+        "vscode-wallpaper-engine.serverPort": {
+          "type": "number",
+          "default": 23333,
+          "description": "网页壁纸服务器端口"
+        },
+        "vscode-wallpaper-engine.wallpaperId": {
+          "type": "string",
+          "default": "",
+          "description": "当前选中的壁纸 ID (文件夹名称)"
+        },
+        "vscode-wallpaper-engine.customJs": {
+          "type": "string",
+          "default": "",
+          "description": "自定义注入的 JavaScript 代码 (将在壁纸加载后执行)",
+          "editPresentation": "multilineText"
         }
       }
     }

@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { getConfiguration, validateConfig } from './config';
-import { scanWallpapers } from './core/scanner';
+import { scanWallpapers, getWallpaperById } from './core/scanner';
 import { performInjection, restoreWorkbench } from './core/injector';
 import { WallpaperServer } from './core/server';
 import { WallpaperType } from './core/types';
@@ -13,6 +13,7 @@ import { WALLPAPER_SERVER_PORT } from './config/constants';
 import modifyDom from './playground/modify_dom';
 
 let server: WallpaperServer | undefined;
+let isSettingWallpaper = false;
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -23,7 +24,40 @@ export function activate(context: vscode.ExtensionContext) {
 	console.log('Congratulations, your extension "vscode-wallpaper-engine" is now active!');
     
     server = new WallpaperServer(context);
-    server.start(context.globalState.get<string>('currentWallpaperPath') || '');
+    const initialConfig = getConfiguration();
+    server.start(context.globalState.get<string>('currentWallpaperPath') || '', initialConfig.serverPort);
+
+    // Watch for config changes
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async e => {
+        if (isSettingWallpaper) { return; }
+        
+        if (e.affectsConfiguration('vscode-wallpaper-engine.wallpaperId') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.backgroundOpacity') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.serverPort') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.customJs')) {
+            
+            const config = getConfiguration();
+            if (!config.wallpaperId || !config.workshopPath) { return; }
+
+            const item = getWallpaperById(config.workshopPath, config.wallpaperId);
+            if (item) {
+                const { path: filePath, type } = item.getMediaPath();
+                
+                if (type === WallpaperType.Web && server) {
+                    const dirPath = path.dirname(filePath);
+                    await server.start(dirPath, config.serverPort);
+                }
+
+                // Don't auto restart, prompt instead
+                await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, false);
+                
+                const action = await vscode.window.showInformationMessage('Wallpaper Engine settings changed. Restart to apply?', 'Restart');
+                if (action === 'Restart') {
+                    vscode.commands.executeCommand('workbench.action.reloadWindow');
+                }
+            }
+        }
+    }));
 
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
@@ -62,25 +96,34 @@ export function activate(context: vscode.ExtensionContext) {
             });
 
             if (selected) {
-                const { path: filePath, type } = selected.getMediaPath();
-                
-                // 如果是 Web 类型，我们需要通知 Server 切换目录
-                if (type === WallpaperType.Web) {
-                    // 获取壁纸所在的文件夹目录
-                    const dirPath = path.dirname(filePath);
-                    if (server) {
-                        await server.start(dirPath); 
+                isSettingWallpaper = true;
+                try {
+                    // Update config
+                    await vscode.workspace.getConfiguration('vscode-wallpaper-engine').update('wallpaperId', selected.id, vscode.ConfigurationTarget.Global);
+
+                    const { path: filePath, type } = selected.getMediaPath();
+                    
+                    // 如果是 Web 类型，我们需要通知 Server 切换目录
+                    if (type === WallpaperType.Web) {
+                        // 获取壁纸所在的文件夹目录
+                        const dirPath = path.dirname(filePath);
+                        if (server) {
+                            await server.start(dirPath, config.serverPort); 
+                        }
                     }
+                    
+                    await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, true);
+                } finally {
+                    setTimeout(() => { isSettingWallpaper = false; }, 2000);
                 }
-                
-                await performInjection(filePath, type, config.opacity);
             }
         });
     });
 	context.subscriptions.push(setWallPaperCmd);
 
     const openInBrowserCmd = vscode.commands.registerCommand('vscode-wallpaper-engine.openInBrowser', async () => {
-        const url = `http://127.0.0.1:${WALLPAPER_SERVER_PORT}/index.html`;
+        const config = getConfiguration();
+        const url = `http://127.0.0.1:${config.serverPort}/index.html`;
         await vscode.env.openExternal(vscode.Uri.parse(url));
     });
     context.subscriptions.push(openInBrowserCmd);
