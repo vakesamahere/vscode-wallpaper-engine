@@ -22,7 +22,7 @@ export class WallpaperItem implements vscode.QuickPickItem {
     }
 
     getMediaPath(): { path: string, type: WallpaperType } {
-        let mainFile = this.detail;
+        let mainFile = this.detail || 'index.html'; // Fallback
         let finalPath = path.join(this.dirPath, mainFile);
 
         // 针对 Image 类型的特殊处理：如果主文件不是常见图片格式，尝试使用 preview.jpg
@@ -36,6 +36,40 @@ export class WallpaperItem implements vscode.QuickPickItem {
     }
 }
 
+function resolveWallpaperInfo(workshopPath: string, id: string, visited = new Set<string>()): { type: WallpaperType, file: string } | null {
+    if (visited.has(id)) return null;
+    visited.add(id);
+
+    const dirPath = path.join(workshopPath, id);
+    const projectJsonPath = path.join(dirPath, 'project.json');
+    if (!fs.existsSync(projectJsonPath)) return null;
+
+    try {
+        const json = JSON.parse(fs.readFileSync(projectJsonPath, 'utf-8'));
+        const rawType = json.type ? json.type.toLowerCase() : '';
+        let type: WallpaperType | null = null;
+
+        if (rawType === 'video') type = WallpaperType.Video;
+        else if (rawType === 'image') type = WallpaperType.Image;
+        else if (rawType === 'web' || rawType === 'scene') type = WallpaperType.Web;
+
+        let file = json.file || null;
+
+        if (type) {
+            return { type, file: file || 'index.html' };
+        }
+
+        // Try dependency
+        if (json.dependency) {
+            const depInfo = resolveWallpaperInfo(workshopPath, json.dependency, visited);
+            if (depInfo) {
+                return { type: depInfo.type, file: file || depInfo.file };
+            }
+        }
+    } catch (e) {}
+    return null;
+}
+
 export function scanWallpapers(workshopPath: string): WallpaperItem[] {
     const wallpaperDirs = fs.readdirSync(workshopPath).filter(file => 
         fs.statSync(path.join(workshopPath, file)).isDirectory()
@@ -44,55 +78,39 @@ export function scanWallpapers(workshopPath: string): WallpaperItem[] {
     const items: WallpaperItem[] = [];
 
     for (const dir of wallpaperDirs) {
-        const projectJsonPath = path.join(workshopPath, dir, 'project.json');
-        if (fs.existsSync(projectJsonPath)) {
+        const info = resolveWallpaperInfo(workshopPath, dir);
+        if (info) {
+            const projectJsonPath = path.join(workshopPath, dir, 'project.json');
             try {
                 const json = JSON.parse(fs.readFileSync(projectJsonPath, 'utf-8'));
-                const rawType = json.type ? json.type.toLowerCase() : '';
-                
-                // 过滤类型
-                let type: WallpaperType | null = null;
-                if (rawType === 'video') { type = WallpaperType.Video; }
-                else if (rawType === 'image') { type = WallpaperType.Image; }
-                else if (rawType === 'web') { type = WallpaperType.Web; }
-
-                if (json.file && type) {
-                    items.push(new WallpaperItem(
-                        json.title || '未命名', 
-                        dir, 
-                        json.file, 
-                        path.join(workshopPath, dir),
-                        type
-                    ));
-                }
-            } catch (e) { }
+                items.push(new WallpaperItem(
+                    json.title || '未命名', 
+                    dir, 
+                    info.file, 
+                    path.join(workshopPath, dir),
+                    info.type
+                ));
+            } catch (e) {}
         }
     }
     return items;
 }
 
 export function getWallpaperById(workshopPath: string, id: string): WallpaperItem | null {
-    const dirPath = path.join(workshopPath, id);
-    const projectJsonPath = path.join(dirPath, 'project.json');
-    if (fs.existsSync(projectJsonPath)) {
+    const info = resolveWallpaperInfo(workshopPath, id);
+    if (info) {
+        const dirPath = path.join(workshopPath, id);
+        const projectJsonPath = path.join(dirPath, 'project.json');
         try {
             const json = JSON.parse(fs.readFileSync(projectJsonPath, 'utf-8'));
-            const rawType = json.type ? json.type.toLowerCase() : '';
-            let type: WallpaperType | null = null;
-            if (rawType === 'video') { type = WallpaperType.Video; }
-            else if (rawType === 'image') { type = WallpaperType.Image; }
-            else if (rawType === 'web') { type = WallpaperType.Web; }
-
-            if (json.file && type) {
-                return new WallpaperItem(
-                    json.title || '未命名', 
-                    id, 
-                    json.file, 
-                    dirPath,
-                    type
-                );
-            }
-        } catch (e) { }
+            return new WallpaperItem(
+                json.title || '未命名', 
+                id, 
+                info.file, 
+                dirPath,
+                info.type
+            );
+        } catch (e) {}
     }
     return null;
 }

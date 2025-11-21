@@ -280,6 +280,16 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
         `;
     }
 
+    const SIDEBAR_CSS = `
+    #vscode-wallpaper-sidebar input[type="range"], #vscode-wallpaper-sidebar input[type="color"], #vscode-wallpaper-sidebar select { width: 100%; background: #3c3c3c; border: 1px solid #555; color: white; margin-top: 5px; }
+    #vscode-wallpaper-sidebar .control-item { margin-bottom: 15px; }
+    #vscode-wallpaper-sidebar label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+    #vscode-wallpaper-sidebar span.val { float: right; font-size: 11px; color: #007acc; }
+    ${(()=>{if (showDebugSidebar) {return "";} else {
+        return "#vscode-wallpaper-sidebar { display: none !important; } #vscode-wallpaper-sidebar + #sidebar-open-btn { display: none !important; }";
+    }})()}
+    `;
+
     const jsInjection = `
 /* [VSCode-Wallpaper-Injection-Start] */
 (function() {
@@ -300,7 +310,7 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
         container.style.display = 'flex';
 
         // Sidebar
-        if (${showDebugSidebar}) {
+        if (true) {
             // container.style.pointerEvents = 'auto';
             
             // Use insertAdjacentHTML to handle multiple root elements correctly
@@ -470,13 +480,6 @@ const SIDEBAR_HTML = `
 </button>
 `;
 
-const SIDEBAR_CSS = `
-#vscode-wallpaper-sidebar input[type="range"], #vscode-wallpaper-sidebar input[type="color"], #vscode-wallpaper-sidebar select { width: 100%; background: #3c3c3c; border: 1px solid #555; color: white; margin-top: 5px; }
-#vscode-wallpaper-sidebar .control-item { margin-bottom: 15px; }
-#vscode-wallpaper-sidebar label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
-#vscode-wallpaper-sidebar span.val { float: right; font-size: 11px; color: #007acc; }
-`;
-
 const SIDEBAR_JS_LOGIC = `
     function getSafeValue(p) {
         if (p.value !== undefined && p.value !== null) return p.value;
@@ -643,9 +646,12 @@ const SIDEBAR_JS_LOGIC = `
         
         if (audioSourceType === 'simulate') {
             const t = Date.now() / 1000;
-            for (let i = 0; i < 64; i++) {
-                const v = Math.sin(t * 5 + i * 0.1) * 0.5 + 0.5;
-                audioData[i] = v; // 0..1
+            for(let i=0; i<64; i++) {
+                let v = Math.max(0, Math.sin(i*0.1 + t*10) * 0.8);
+                v *= (1 - i/64);
+                v += Math.random() * 0.2; 
+                audioData[i] = Math.min(1, v);
+                audioData[i+64] = Math.min(1, v);
             }
         } else if ((audioSourceType === 'mic' || audioSourceType === 'system') && analyser) {
             analyser.getByteFrequencyData(dataArray);

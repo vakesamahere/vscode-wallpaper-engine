@@ -12,7 +12,7 @@ import { WALLPAPER_SERVER_PORT } from './config/constants';
 // test
 import modifyDom from './playground/modify_dom';
 
-const SHOW_DEBUG_SIDEBAR = true; // [Dev] Toggle Debug Sidebar
+const SHOW_DEBUG_SIDEBAR = false; // [Dev] Toggle Debug Sidebar
 
 let server: WallpaperServer | undefined;
 let isSettingWallpaper = false;

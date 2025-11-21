@@ -384,7 +384,22 @@ export class WallpaperServer {
                             html = injection + html;
                         }
                         res.end(html);
-                    } else {
+                    } 
+                    // [New] Patch JS files to fix file:/// issue (copied from demo)
+                    else if (ext === '.js') {
+                        let content = data.toString('utf-8');
+                        if (content.includes('var path = "file:///" + filePath;')) {
+                            console.log(`[Server] Patching file:/// issue in ${path.basename(filePath)}`);
+                            content = content.replace(
+                                'var path = "file:///" + filePath;',
+                                'var path = (filePath.indexOf("http")===0 ? "" : "file:///") + filePath;'
+                            );
+                            res.end(content);
+                        } else {
+                            res.end(data);
+                        }
+                    }
+                    else {
                         res.end(data);
                     }
                 });
