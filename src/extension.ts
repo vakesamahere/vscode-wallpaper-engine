@@ -12,6 +12,8 @@ import { WALLPAPER_SERVER_PORT } from './config/constants';
 // test
 import modifyDom from './playground/modify_dom';
 
+const SHOW_DEBUG_SIDEBAR = true; // [Dev] Toggle Debug Sidebar
+
 let server: WallpaperServer | undefined;
 let isSettingWallpaper = false;
 
@@ -51,7 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
                 }
 
                 // Don't auto restart, prompt instead
-                await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, false);
+                await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, false, SHOW_DEBUG_SIDEBAR);
                 
                 const action = await vscode.window.showInformationMessage('Wallpaper Engine settings changed. Restart to apply?', 'Restart');
                 if (action === 'Restart') {
@@ -114,7 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
                         }
                     }
                     
-                    await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, true);
+                    await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, true, SHOW_DEBUG_SIDEBAR);
                 } finally {
                     setTimeout(() => { isSettingWallpaper = false; }, 2000);
                 }

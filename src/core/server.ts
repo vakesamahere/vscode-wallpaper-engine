@@ -1,4 +1,5 @@
 import * as http from 'http';
+import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -11,6 +12,9 @@ export class WallpaperServer {
     private retryInterval: NodeJS.Timeout | null = null;
     // 端口必须与 injector.ts 里的保持一致
     private PORT = WALLPAPER_SERVER_PORT; 
+
+    private searchPaths: string[] = [];
+    private workshopBasePath: string | null = null;
 
     constructor(private context: vscode.ExtensionContext) {
         // 插件启动时，尝试恢复之前的服务器状态
@@ -41,24 +45,23 @@ export class WallpaperServer {
         // [关键] 等待状态保存完成！防止重启后丢失路径
         await this.context.globalState.update('currentWallpaperPath', rootPath);
 
+        this.updateSearchPaths(rootPath); // [New] Update search paths on server start
+
         this.server = http.createServer((req, res) => {
             const safeRoot = path.normalize(this.currentRoot);
             // 简单的 URL 处理
             let reqUrl = req.url ? decodeURIComponent(req.url.split('?')[0]) : '/';
             
+            console.log(`[Server] Request: ${req.method} ${req.url} -> ${reqUrl}`);
+
             // 默认访问 index.html
             if (reqUrl === '/' || reqUrl === '') {
                 reqUrl = '/index.html';
             }
 
-            const filePath = path.join(safeRoot, reqUrl);
-
-            // 安全检查：禁止访问上级目录
-            if (!filePath.startsWith(safeRoot)) {
-                res.statusCode = 403;
-                res.end('Access Denied');
-                return;
-            }
+            // [Removed] filePath calculation moved to end
+            // const filePath = path.join(safeRoot, reqUrl);
+            // if (!filePath.startsWith(safeRoot)) { ... }
 
             // ping，用于检测服务器是否在线，直接返回 200
             if (reqUrl === '/ping') {
@@ -85,7 +88,21 @@ export class WallpaperServer {
 
             // [New] API to get entry HTML (for srcdoc injection)
             if (reqUrl === '/api/get-entry') {
-                const entryPath = path.join(safeRoot, 'index.html');
+                let entryPath = '';
+                for (const basePath of this.searchPaths) {
+                    const tryPath = path.join(basePath, 'index.html');
+                    if (fs.existsSync(tryPath)) {
+                        entryPath = tryPath;
+                        break;
+                    }
+                }
+
+                if (!entryPath) {
+                    res.statusCode = 404;
+                    res.end('Entry Not Found');
+                    return;
+                }
+
                 fs.readFile(entryPath, (err, data) => {
                     if (err) {
                         res.statusCode = 404;
@@ -105,6 +122,10 @@ export class WallpaperServer {
                     // Inject base tag and scripts
                     const injection = `
 <base href="http://127.0.0.1:${this.PORT}/" />
+<style>
+    /* Hide common debug elements (stats.js, dat.gui, etc) */
+    #stats, .stats, #fps, .fps, #debug, .debug, .dg.ac { display: none !important; }
+</style>
 <script src="/vscode-wallpaper-engine-mock-api.js"></script>
 <script src="/vscode-wallpaper-engine-bootstrap.js"></script>
 `;
@@ -122,39 +143,268 @@ export class WallpaperServer {
                 return;
             }
 
-            fs.readFile(filePath, (err, data) => {
-                if (err) {
-                    console.warn(`[Server 404] ${reqUrl}`);
-                    res.statusCode = 404;
-                    res.end('Not Found');
+            // [New] API: readdir
+            if (reqUrl === '/api/readdir') {
+                const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+                let targetPath = urlObj.searchParams.get("path");
+                if (targetPath) {
+                    targetPath = targetPath.replace(/^[\\/]+/, ""); // Remove leading slashes
+                    
+                    // Search in all paths
+                    let allFiles = new Set<string>();
+                    for (const basePath of this.searchPaths) {
+                        const fullPath = path.join(basePath, targetPath);
+                        if (fullPath.startsWith(basePath) && fs.existsSync(fullPath)) {
+                            try {
+                                if (fs.statSync(fullPath).isDirectory()) {
+                                    const files = fs.readdirSync(fullPath);
+                                    files.forEach(f => allFiles.add(f));
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                    
+                    if (allFiles.size > 0) {
+                        res.setHeader('Content-Type', 'application/json');
+                        res.setHeader('Access-Control-Allow-Origin', '*');
+                        res.end(JSON.stringify(Array.from(allFiles)));
+                        return;
+                    }
+                }
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end('[]');
+                return;
+            }
+
+            // [New] API: random-file
+            if (reqUrl === '/api/random-file') {
+                console.log(`[Server] Handling random-file request`);
+                const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+                const propName = urlObj.searchParams.get("prop");
+                
+                // 1. Read project.json (merged)
+                let finalProps: any = {};
+                for (let i = this.searchPaths.length - 1; i >= 0; i--) {
+                    const pPath = path.join(this.searchPaths[i], "project.json");
+                    if (fs.existsSync(pPath)) {
+                        try {
+                            const content = JSON.parse(fs.readFileSync(pPath, "utf-8"));
+                            const props = content.properties || (content.general && content.general.properties) || {};
+                            Object.assign(finalProps, props);
+                            if (content.preset) {
+                                Object.keys(content.preset).forEach((key: string) => {
+                                    if (finalProps[key]) {
+                                        finalProps[key].value = content.preset[key];
+                                    }
+                                });
+                            }
+                        } catch (e) {}
+                    }
+                }
+
+                let targetPath: string | null = null;
+                let prop = finalProps[propName || ''];
+                if (!prop && propName) {
+                    const key = Object.keys(finalProps).find(k => k.toLowerCase() === propName.toLowerCase());
+                    if (key) { prop = finalProps[key]; }
+                }
+                
+                if (prop) {
+                    targetPath = prop.value || prop.default;
+                }
+
+                let fileUrl = null;
+                if (targetPath) {
+                    targetPath = targetPath.replace(/^[\\/]+/, "");
+                    
+                    // Find files in all search paths
+                    let allFiles: string[] = [];
+                    for (const basePath of this.searchPaths) {
+                        const fullPath = path.join(basePath, targetPath);
+                        if (fullPath.startsWith(basePath) && fs.existsSync(fullPath)) {
+                            try {
+                                if (fs.statSync(fullPath).isDirectory()) {
+                                    const files = fs.readdirSync(fullPath);
+                                    const validFiles = files.filter(f => /\.(jpg|jpeg|png|gif|webm|mp4)$/i.test(f));
+                                    allFiles = allFiles.concat(validFiles);
+                                }
+                            } catch (e) {}
+                        }
+                    }
+
+                    if (allFiles.length > 0) {
+                        const randomFile = allFiles[Math.floor(Math.random() * allFiles.length)];
+                        fileUrl = `http://127.0.0.1:${this.PORT}/${targetPath}/${randomFile}`;
+                    }
+                }
+                
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end(JSON.stringify({ file: fileUrl }));
+                return;
+            }
+
+            // [New] API: Proxy
+            if (reqUrl === '/proxy') {
+                const urlObj = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+                const targetUrl = urlObj.searchParams.get("url");
+                if (!targetUrl) {
+                    res.statusCode = 400;
+                    res.end("Missing url param");
                     return;
                 }
 
-                const ext = path.extname(filePath).toLowerCase();
-                const mimeType = this.getMimeType(ext);
-                res.setHeader('Content-Type', mimeType);
-                res.setHeader('Access-Control-Allow-Origin', '*'); // 允许跨域
-                res.setHeader('Access-Control-Allow-Private-Network', 'true');
+                console.log(`[Proxy] ${targetUrl}`);
+                const lib = targetUrl.startsWith("https") ? https : http;
+                const proxyReq = lib.get(targetUrl, (proxyRes) => {
+                    // Copy headers but ensure CORS
+                    const headers = { ...proxyRes.headers };
+                    // Remove existing CORS headers to avoid conflicts
+                    delete headers['access-control-allow-origin'];
+                    delete headers['access-control-allow-methods'];
+                    delete headers['access-control-allow-headers'];
+                    
+                    headers["access-control-allow-origin"] = "*";
+                    headers["access-control-allow-methods"] = "GET, POST, OPTIONS";
+                    headers["access-control-allow-headers"] = "*";
+                    headers["access-control-allow-credentials"] = "true";
+                    
+                    res.writeHead(proxyRes.statusCode || 200, headers);
+                    proxyRes.pipe(res);
+                });
+                
+                proxyReq.on("error", (e) => {
+                    console.error(`[Proxy Error] ${e.message}`);
+                    res.statusCode = 500;
+                    res.end(e.message);
+                });
+                return;
+            }
 
-                // [New] Inject scripts into HTML
-                if (ext === '.html') {
-                    let html = data.toString('utf-8');
-                    const injection = `
+            // [New] API: Serve processed project.json (with presets applied)
+            if (reqUrl === '/project.json') {
+                let finalProject: any = {};
+                let finalProps: any = {};
+                
+                // Merge from dependencies (reverse order)
+                for (let i = this.searchPaths.length - 1; i >= 0; i--) {
+                    const pPath = path.join(this.searchPaths[i], "project.json");
+                    if (fs.existsSync(pPath)) {
+                        try {
+                            console.log(`[add set] Parsing project.json at ${pPath}`);
+                            const content = JSON.parse(fs.readFileSync(pPath, "utf-8"));
+                            console.log(`[add set] Merging content from ${pPath}`);
+                            Object.assign(finalProject, content);
+                            
+                            const props = content.properties || (content.general && content.general.properties) || {};
+                            console.log(`[add set] Found properties: ${Object.keys(props).map(k => `${k}=${props[k].value ?? props[k].default}`).join(', ')}`);
+                            Object.assign(finalProps, props);
+                            
+                            if (content.preset) {
+                                console.log(`[add set] Found presets: ${Object.keys(content.preset).join(', ')}`);
+                                Object.keys(content.preset).forEach((key: string) => {
+                                    if (finalProps[key]) {
+                                        console.log(`[add set] Applying preset for ${key}: ${content.preset[key]}`);
+                                        finalProps[key].value = content.preset[key];
+                                        finalProps[key].default = content.preset[key];
+                                    }
+                                });
+                            }
+                        } catch (e) {
+                            console.log(`[add set] Error parsing ${pPath}: ${e}`);
+                        }
+                    }
+                }
+                
+                if (!finalProject.general) { finalProject.general = {}; }
+                finalProject.general.properties = finalProps;
+                
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end(JSON.stringify(finalProject));
+                return;
+            }
+
+            // [Modified] File Serving with Search Paths
+            let filePath = '';
+            let fileFound = false;
+            
+            console.log(`[add file] Request: ${reqUrl}`);
+            
+            for (const basePath of this.searchPaths) {
+                const tryPath = path.join(basePath, reqUrl);
+                if (tryPath.startsWith(basePath) && fs.existsSync(tryPath) && fs.statSync(tryPath).isFile()) {
+                    filePath = tryPath;
+                    fileFound = true;
+                    console.log(`[add file] Serving: ${filePath}`);
+                    break;
+                }
+            }
+
+            // [New] Fallback: Try to find file in the workshop base path (sibling directories)
+            if (!fileFound && this.workshopBasePath) {
+                // Remove leading slash for safe joining
+                const safeUrl = reqUrl.replace(/^[\\/]+/, "");
+                const tryPath = path.join(this.workshopBasePath, safeUrl);
+                // Ensure the path is still within workshopBasePath (basic security)
+                if (tryPath.startsWith(this.workshopBasePath) && fs.existsSync(tryPath) && fs.statSync(tryPath).isFile()) {
+                    filePath = tryPath;
+                    fileFound = true;
+                    console.log(`[add file] Serving from workshop base: ${filePath}`);
+                }
+            }
+
+            if (fileFound) {
+                fs.readFile(filePath, (err, data) => {
+                    if (err) {
+                        res.statusCode = 500;
+                        res.end('Error reading file');
+                        return;
+                    }
+
+                    const ext = path.extname(filePath).toLowerCase();
+                    const mimeType = this.getMimeType(ext);
+                    res.setHeader('Content-Type', mimeType);
+                    res.setHeader('Access-Control-Allow-Origin', '*'); // 允许跨域
+                    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+
+                    // [New] Inject scripts into HTML
+                    if (ext === '.html') {
+                        let html = data.toString('utf-8');
+                        const injection = `
 <script src="/vscode-wallpaper-engine-mock-api.js"></script>
 <script src="/vscode-wallpaper-engine-bootstrap.js"></script>
 `;
-                    if (html.includes('<head>')) {
-                        html = html.replace('<head>', '<head>' + injection);
-                    } else if (html.includes('<body>')) {
-                        html = html.replace('<body>', '<body>' + injection);
+                        if (html.includes('<head>')) {
+                            html = html.replace('<head>', '<head>' + injection);
+                        } else if (html.includes('<body>')) {
+                            html = html.replace('<body>', '<body>' + injection);
+                        } else {
+                            html = injection + html;
+                        }
+                        res.end(html);
                     } else {
-                        html = injection + html;
+                        res.end(data);
                     }
-                    res.end(html);
-                } else {
-                    res.end(data);
-                }
-            });
+                });
+                return;
+            } else {
+                console.warn(`[Server 404] ${reqUrl}`);
+                console.log(`[add file] Not Found: ${reqUrl} in paths: ${JSON.stringify(this.searchPaths)}`);
+                res.statusCode = 404;
+                res.end('Not Found');
+            }
+
+            // Handle CORS preflight requests
+            if (req.method === 'OPTIONS') {
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+                res.setHeader('Access-Control-Allow-Headers', '*');
+                res.writeHead(200);
+                res.end();
+                return;
+            }
         });
 
         vscode.window.setStatusBarMessage(`Wallpaper Server: Running at port ${this.PORT}!`, 5000);
@@ -185,6 +435,73 @@ export class WallpaperServer {
         req.on('error', (e) => {
             vscode.window.setStatusBarMessage(`Wallpaper Server: Error starting server`, 5000);
         });
+    }
+
+    private updateSearchPaths(rootPath: string) {
+        console.log(`[add file] Updating search paths for root: ${rootPath}`);
+        this.searchPaths = [rootPath];
+        
+        // Always set workshop base path to parent directory, consistent with demo
+        const basePath = path.dirname(rootPath);
+        this.workshopBasePath = basePath;
+        console.log(`[add file] Inferred base path: ${basePath}`);
+
+        // Try to find dependencies if it looks like a workshop ID
+        const match = rootPath.match(/[\\/](\d+)$/);
+        if (match) {
+            const currentId = match[1];
+            
+            const visited = new Set([currentId]);
+            const queue = [currentId];
+            
+            while (queue.length > 0) {
+                const currId = queue.shift();
+                if (!currId) { continue; }
+
+                let currPath = rootPath;
+                if (currId !== currentId) {
+                    currPath = path.join(basePath, currId);
+                }
+                
+                console.log(`[add file] Checking dependency: ${currId} at ${currPath}`);
+                const projPath = path.join(currPath, "project.json");
+                if (fs.existsSync(projPath)) {
+                    try {
+                        const proj = JSON.parse(fs.readFileSync(projPath, "utf-8"));
+                        let deps: string[] = [];
+                        if (typeof proj.dependency === "string") {
+                            deps = [proj.dependency];
+                        } else if (Array.isArray(proj.dependency)) {
+                            deps = proj.dependency;
+                        }
+                        
+                        if (deps.length > 0) {
+                            console.log(`[add file] Found dependencies in ${currId}: ${deps.join(', ')}`);
+                        }
+                        
+                        for (const depId of deps) {
+                            if (!visited.has(depId)) {
+                                visited.add(depId);
+                                queue.push(depId);
+                                const depPath = path.join(basePath, depId);
+                                if (fs.existsSync(depPath)) {
+                                    this.searchPaths.push(depPath);
+                                    console.log(`[Server] Added dependency: ${depId}`);
+                                    console.log(`[add file] Found dependency path: ${depPath}`);
+                                } else {
+                                    console.log(`[add file] Dependency path not found: ${depPath}`);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.log(`[add file] Error reading project.json at ${projPath}: ${e}`);
+                    }
+                } else {
+                    console.log(`[add file] project.json not found at ${projPath}`);
+                }
+            }
+        }
+        console.log(`[add file] Final searchPaths: ${JSON.stringify(this.searchPaths)}`);
     }
 
     private startWatchdog() {

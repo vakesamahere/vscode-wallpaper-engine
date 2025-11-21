@@ -1,25 +1,31 @@
-
 export const MOCK_API_SCRIPT = `
 (function() {
     console.log("[WE-Mock] Initializing Environment...");
 
     // ============================================================
     // 🛠️ Node.js / Electron 环境伪造 (Polyfill)
-    // 解决 Uncaught ReferenceError: require is not defined
     // ============================================================
     
-    // 1. 模拟 require
-    // 很多壁纸用它来加载 vue, three.js 或者 json
-    // 我们返回一个 Proxy 或者空对象，防止报错
+    // 1. Mock require
     window.require = function(moduleName) {
         console.log(\`[WE-Mock] ⚠️ Wallpaper tried to require('\${moduleName}')\`);
         
-        // 针对常见模块做特殊 Mock
+        if (moduleName === 'jquery') {
+            if (window.jQuery) return window.jQuery;
+            return window.$ || {};
+        }
         if (moduleName === 'fs') {
             return {
                 readFileSync: () => '',
                 readFile: (path, cb) => cb(null, ''),
-                existsSync: () => false
+                existsSync: () => false,
+                readdir: (path, cb) => {
+                    // Use relative path, base tag handles the rest
+                    fetch(\`/api/readdir?path=\${encodeURIComponent(path)}\`)
+                        .then(r => r.json())
+                        .then(files => cb && cb(null, files))
+                        .catch(e => cb && cb(e));
+                }
             };
         }
         if (moduleName === 'path') {
@@ -37,27 +43,49 @@ export const MOCK_API_SCRIPT = `
                 }
             };
         }
-        
-        // 默认返回空对象，防止调用报错
         return {};
     };
 
-    // 2. 模拟 module 和 exports (CommonJS 规范)
-    // [FIX] Three.js 等库如果检测到 module/exports 会尝试导出而不是挂载到 window
-    // 所以这里必须显式设为 undefined，强制它们使用 Global 模式
-    window.module = undefined;
-    window.exports = undefined;
-    window.define = undefined;
+    // 2. Mock module/exports
+    // [Smart Fix] Handle UMD libraries (like jQuery) that hide themselves if module.exports exists
+    var _exports = {};
+    window.module = {};
+    Object.defineProperty(window.module, 'exports', {
+        get: function() { return _exports; },
+        set: function(v) {
+            _exports = v;
+            // Auto-expose jQuery if detected
+            if (v && v.fn && v.fn.jquery) {
+                console.log("[WE-Mock] Detected jQuery in module.exports, exposing globally.");
+                window.jQuery = v;
+                window.$ = v;
+            }
+        }
+    });
+    Object.defineProperty(window, 'exports', {
+        get: function() { return window.module.exports; },
+        set: function(v) { window.module.exports = v; }
+    });
 
-    // 3. 模拟 process (用于检测环境变量)
+    // 3. Mock Smooth.js
+    if (typeof window.Smooth === "undefined") {
+        window.Smooth = function (arr, config) {
+            return function (t) { return arr && arr.length > 0 ? arr[0] : 0; };
+        };
+        window.Smooth.METHOD_CUBIC = "cubic";
+        window.Smooth.METHOD_LINEAR = "linear";
+        window.Smooth.METHOD_NEAREST = "nearest";
+    }
+
+    // 4. Mock process
     window.process = {
         type: 'renderer',
         versions: { electron: 'mock', chrome: 'mock', node: 'mock' },
         platform: 'win32',
-        env: { NODE_ENV: 'development' }
+        env: { NODE_ENV: 'production' }
     };
 
-    // 4. 模拟 global
+    // 5. Mock global
     window.global = window;
 
     // ============================================================
@@ -70,7 +98,6 @@ export const MOCK_API_SCRIPT = `
         general: null
     };
 
-    // 核心 API
     Object.defineProperty(window, 'wallpaperPropertyListener', {
         set: function(l) {
             console.log("[WE-Mock] Property Listener Registered");
@@ -81,18 +108,18 @@ export const MOCK_API_SCRIPT = `
     });
 
     window.wallpaperRegisterAudioListener = function(cb) {
-        console.log("[WE-Mock] Audio Listener Registered");
         window.__WE_CALLBACKS__.audio = cb;
     };
 
-    // 辅助 API (防止报错)
     window.wallpaperRegisterMediaStatusListener = function() {};
     window.wallpaperRegisterMediaPropertiesListener = function() {};
     window.wallpaperRegisterMediaTimelineListener = function() {};
-    window.wallpaperRequestRandomFileForProperty = function(name, cb) {
-        console.log("[WE-Mock] Request File:", name);
-        // 模拟返回一个占位图，实际使用中可能需要指向 server 里的某个默认图
-        cb('preview.jpg'); 
+    
+    window.wallpaperRequestRandomFileForProperty = function(propName, cb) {
+        fetch(\`/api/random-file?prop=\${encodeURIComponent(propName)}\`)
+            .then(r => r.json())
+            .then(data => cb && cb(propName, data.file || null))
+            .catch(e => cb && cb(propName, null));
     };
 
     // ============================================================
@@ -103,8 +130,7 @@ export const MOCK_API_SCRIPT = `
         const { type, data } = e.data;
         const cbs = window.__WE_CALLBACKS__;
 
-        if (type === 'UPDATE_PROPERTIES' && cbs.properties) {
-            // 防御性编程：有些壁纸没有实现 applyUserProperties
+        if ((type === 'UPDATE_PROPERTIES' || type === 'PROPERTIES') && cbs.properties) {
             if (cbs.properties.applyUserProperties) {
                 cbs.properties.applyUserProperties(data);
             }
@@ -118,7 +144,68 @@ export const MOCK_API_SCRIPT = `
             }
         }
     });
-    
+
+    // Fixes
+    window.t = null;
+    window.wt = null;
+
+    // Intercept Image Src
+    const originalImageSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+    if (originalImageSrcDescriptor && originalImageSrcDescriptor.set) {
+        Object.defineProperty(HTMLImageElement.prototype, "src", {
+            set: function (val) {
+                if (val === null || val === "null" || val === undefined || val === "undefined") return;
+                originalImageSrcDescriptor.set.call(this, val);
+            },
+            get: originalImageSrcDescriptor.get,
+        });
+    }
+
+    // [New] Intercept Media Src (Video/Audio)
+    const originalMediaSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src");
+    if (originalMediaSrcDescriptor && originalMediaSrcDescriptor.set) {
+        Object.defineProperty(HTMLMediaElement.prototype, "src", {
+            set: function (val) {
+                if (val === null || val === "null" || val === undefined || val === "undefined") return;
+                originalMediaSrcDescriptor.set.call(this, val);
+            },
+            get: originalMediaSrcDescriptor.get,
+        });
+    }
+
+    // [New] Intercept setAttribute to prevent "null"
+    const originalSetAttribute = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function(name, val) {
+        if (name === 'src' && (val === null || val === 'null' || val === undefined || val === 'undefined')) {
+            console.warn("[WE-Mock] Prevented setAttribute('src', null/undefined)", this);
+            return;
+        }
+        return originalSetAttribute.call(this, name, val);
+    };
+
+    // [New] Intercept XMLHttpRequest for Proxy
+    const originalOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url, ...args) {
+        if (typeof url === "string" && url.startsWith("http") && !url.includes(location.host)) {
+            console.log(\`[WE-Mock] Proxying request: \${url}\`);
+            url = \`/proxy?url=\${encodeURIComponent(url)}\`;
+        }
+        return originalOpen.call(this, method, url, ...args);
+    };
+
+    // [New] Intercept Video Play (Autoplay Fix)
+    const originalPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+        return originalPlay.call(this).catch((e) => {
+            if (e.name === "NotAllowedError") {
+                console.warn("[WE-Mock] Autoplay blocked, muting and retrying...");
+                this.muted = true;
+                return originalPlay.call(this);
+            }
+            throw e;
+        });
+    };
+
     console.log("[WE-Mock] Ready.");
 })();
 `;
