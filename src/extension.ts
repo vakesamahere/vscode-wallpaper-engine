@@ -113,11 +113,13 @@ export function activate(context: vscode.ExtensionContext) {
                         // 获取壁纸所在的文件夹目录
                         const dirPath = path.dirname(filePath);
                         if (server) {
-                            await server.start(dirPath, config.serverPort); 
+                            await server.start(dirPath, config.serverPort);
+                            server.triggerReload(); // Trigger reload via ping
                         }
                     }
                     
-                    await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, true, SHOW_DEBUG_SIDEBAR);
+                    // Pass autoRestart=false because we handle reload via ping
+                    await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, false, SHOW_DEBUG_SIDEBAR);
                 } finally {
                     setTimeout(() => { isSettingWallpaper = false; }, 2000);
                 }

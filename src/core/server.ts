@@ -17,6 +17,7 @@ export class WallpaperServer {
 
     private searchPaths: string[] = [];
     private workshopBasePath: string | null = null;
+    private reloadFlag = false; // [New] Flag to trigger client reload
 
     private shutdownTimeout: NodeJS.Timeout | null = null;
     private readonly SHUTDOWN_DELAY = 2 * 60 * 1000; // 2 minutes
@@ -43,13 +44,73 @@ export class WallpaperServer {
         }, this.SHUTDOWN_DELAY);
     }
 
+    public triggerReload() {
+        this.reloadFlag = true;
+    }
+
+    private checkServerStatus(port: number): Promise<{ running: boolean, rootPath: string } | null> {
+        return new Promise((resolve) => {
+            const req = http.get(`http://127.0.0.1:${port}/status`, (res) => {
+                if (res.statusCode !== 200) {
+                    resolve(null);
+                    return;
+                }
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch {
+                        resolve(null);
+                    }
+                });
+            });
+            req.on('error', () => resolve(null));
+            req.setTimeout(500, () => {
+                req.destroy();
+                resolve(null);
+            });
+        });
+    }
+
+    private shutdownRemoteServer(port: number): Promise<void> {
+        return new Promise((resolve) => {
+            const req = http.get(`http://127.0.0.1:${port}/shutdown`, (res) => {
+                resolve();
+            });
+            req.on('error', () => resolve());
+            req.setTimeout(1000, () => {
+                req.destroy();
+                resolve();
+            });
+        });
+    }
+
     // [修改] 变成 async，确保状态保存完毕
     public async start(rootPath: string, port: number, silent = false) {
         this.PORT = port;
         vscode.window.setStatusBarMessage(`Preparing Wallpaper Server...`, 5000);
-        // 如果路径没变且服务器开着，跳过
+        
+        // 1. Check local instance
         if (this.server && this.currentRoot === rootPath) {
             return;
+        }
+
+        // 2. Check external instance (Multi-window support)
+        const status = await this.checkServerStatus(port);
+        if (status && status.running) {
+            if (status.rootPath === rootPath) {
+                console.log(`[Server] Reusing existing server for ${rootPath}`);
+                this.currentRoot = rootPath;
+                // Even if we reuse, we should ensure global state is synced
+                await this.context.globalState.update('currentWallpaperPath', rootPath);
+                return;
+            } else {
+                console.log(`[Server] Existing server running different path (${status.rootPath}). Restarting...`);
+                await this.shutdownRemoteServer(port);
+                // Wait for port to be released
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
 
         // 关闭旧服务
@@ -85,8 +146,37 @@ export class WallpaperServer {
 
             // ping，用于检测服务器是否在线，直接返回 200
             if (reqUrl === '/ping') {
-                res.statusCode = 200;
-                res.end('pong');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                if (this.reloadFlag) {
+                    this.reloadFlag = false;
+                    res.statusCode = 205; // Reset Content
+                    res.end('reload');
+                } else {
+                    res.statusCode = 200;
+                    res.end('pong');
+                }
+                return;
+            }
+
+            // [New] Status endpoint for multi-instance check
+            if (reqUrl === '/status') {
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end(JSON.stringify({
+                    running: true,
+                    rootPath: this.currentRoot
+                }));
+                return;
+            }
+
+            // [New] Shutdown endpoint for multi-instance takeover
+            if (reqUrl === '/shutdown') {
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end('ok');
+                setTimeout(() => {
+                    console.log('[Server] Remote shutdown requested.');
+                    this.stop();
+                }, 100);
                 return;
             }
 

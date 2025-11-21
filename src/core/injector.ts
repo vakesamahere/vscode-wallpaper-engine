@@ -277,8 +277,11 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
                 await new Promise(resolve => setTimeout(resolve, ${startupCheckInterval}));
                 let isHealthy = false;
                 try {
-                    const resp = await fetch(pingUrl, { method: 'GET', mode: 'no-cors' });
-                    isHealthy = true;
+                    const resp = await fetch(pingUrl, { method: 'GET', mode: 'cors' });
+                    if (resp.ok || resp.status === 205) {
+                        isHealthy = true;
+                        console.log("[WP server]: isHealthy = true;");
+                    }
                 } catch (e) {
                     console.warn("Wallpaper Engine: 等待服务器开启...", e);
                 }
@@ -317,7 +320,11 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
                 while(true) {
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     try {
-                        await fetch(pingUrl, { method: 'GET', mode: 'no-cors' });
+                        const resp = await fetch(pingUrl, { method: 'GET', mode: 'cors' });
+                        if (resp.status === 205) {
+                            console.log("Wallpaper Engine: Reload signal received.");
+                            el.srcdoc = srcdocContent;
+                        }
                     } catch(e) {
                         console.warn("Wallpaper Engine: 服务器断开，重新等待...");
                         el.style.opacity = '0'; // 隐藏 iframe

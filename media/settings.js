@@ -7,6 +7,35 @@ function updateProp(key, val) {
   vscode.postMessage({ command: "updateProp", key, value: val });
 }
 
+function updateGeneral(key, val) {
+  vscode.postMessage({ command: "updateGeneral", key, value: val });
+}
+
+// --- Toolbar Handlers ---
+document.getElementById("btn-refresh").addEventListener("click", () => {
+  vscode.postMessage({ command: "refresh" });
+});
+document.getElementById("btn-switch").addEventListener("click", () => {
+  vscode.postMessage({ command: "switch" });
+});
+document.getElementById("btn-browser").addEventListener("click", () => {
+  vscode.postMessage({ command: "openBrowser" });
+});
+
+// --- Search Handler ---
+document.getElementById("search-input").addEventListener("input", (e) => {
+  const term = e.target.value.toLowerCase();
+  const items = document.querySelectorAll("#propsPanel .control-item");
+  items.forEach((item) => {
+    const text = item.innerText.toLowerCase();
+    if (text.includes(term)) {
+      item.classList.remove("hidden");
+    } else {
+      item.classList.add("hidden");
+    }
+  });
+});
+
 function getSafeValue(p) {
   if (p.value !== undefined && p.value !== null) {
     return p.value;
@@ -44,6 +73,81 @@ function weColorToHex(str) {
   return "#" + toHex(parts[0]) + toHex(parts[1]) + toHex(parts[2]);
 }
 
+function renderGeneralSettings() {
+  const panel = document.getElementById("generalPanel");
+  panel.innerHTML = "";
+
+  // Audio Source Select
+  const audioDiv = document.createElement("div");
+  audioDiv.className = "control-item";
+  const audioLbl = document.createElement("label");
+  audioLbl.innerText = "Audio Source";
+  audioDiv.appendChild(audioLbl);
+
+  const audioSelect = document.createElement("select");
+  const audioOptions = [
+    { value: "simulate", label: "Simulate (Sine Wave)" },
+    { value: "mic", label: "Microphone (Real Audio)" },
+    { value: "system", label: "System Audio (Screen Share)" },
+    { value: "off", label: "Off (Silence)" },
+  ];
+  audioOptions.forEach((opt) => {
+    const o = document.createElement("option");
+    o.value = opt.value;
+    o.innerText = opt.label;
+    audioSelect.appendChild(o);
+  });
+  audioSelect.value = "simulate"; // Default
+  audioSelect.onchange = (e) => updateGeneral("audioSource", e.target.value);
+  audioDiv.appendChild(audioSelect);
+  panel.appendChild(audioDiv);
+
+  const generalProps = [
+    {
+      key: "audioVolume",
+      label: "Audio Volume (0-100)",
+      type: "slider",
+      min: 0,
+      max: 100,
+      value: 50,
+    },
+  ];
+
+  generalProps.forEach((p) => {
+    const div = document.createElement("div");
+    div.className = "control-item";
+    const lbl = document.createElement("label");
+    lbl.innerText = p.label;
+    div.appendChild(lbl);
+
+    let input;
+    if (p.type === "slider") {
+      const valSpan = document.createElement("span");
+      valSpan.innerText = p.value;
+      lbl.appendChild(valSpan);
+      input = document.createElement("input");
+      input.type = "range";
+      input.min = p.min;
+      input.max = p.max;
+      input.value = p.value;
+      input.oninput = (e) => {
+        valSpan.innerText = e.target.value;
+        updateGeneral(p.key, parseFloat(e.target.value));
+      };
+    } else if (p.type === "bool") {
+      input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = p.value;
+      input.onchange = (e) => updateGeneral(p.key, e.target.checked);
+    }
+
+    if (input) {
+      div.appendChild(input);
+      panel.appendChild(div);
+    }
+  });
+}
+
 function renderUI(json) {
   const panel = document.getElementById("propsPanel");
   panel.innerHTML = "";
@@ -57,7 +161,8 @@ function renderUI(json) {
     const div = document.createElement("div");
     div.className = "control-item";
     const lbl = document.createElement("label");
-    lbl.innerText = p.text || key;
+    // Use innerHTML to render HTML tags in labels
+    lbl.innerHTML = p.text || key;
     div.appendChild(lbl);
 
     let input;
@@ -122,6 +227,7 @@ function renderUI(json) {
 }
 
 console.log("Settings Webview Loaded");
+renderGeneralSettings(); // Render general settings immediately
 fetch(SERVER_ROOT + "/project.json")
   .then((res) => res.json())
   .then((json) => renderUI(json))

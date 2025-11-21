@@ -52,7 +52,20 @@ export class SettingsPanel {
                         type: 'UPDATE_PROPERTIES',
                         data: { [message.key]: { value: message.value } }
                     });
-                    vscode.window.showInformationMessage(`Received property update for key: ${message.key}`);
+                } else if (message.command === 'updateGeneral') {
+                    // Handle general settings (audio, mic, etc.)
+                    // We'll send a specific message type for these
+                    this.server.broadcast({
+                        type: 'UPDATE_GENERAL',
+                        data: { [message.key]: message.value }
+                    });
+                } else if (message.command === 'refresh') {
+                    this.server.triggerReload();
+                    vscode.window.showInformationMessage('Refreshing wallpaper...');
+                } else if (message.command === 'switch') {
+                    vscode.commands.executeCommand('vscode-wallpaper-engine.setWallpaper');
+                } else if (message.command === 'openBrowser') {
+                    vscode.commands.executeCommand('vscode-wallpaper-engine.openInBrowser');
                 }
             },
             undefined,

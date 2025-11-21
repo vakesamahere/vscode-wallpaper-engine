@@ -206,7 +206,102 @@ export const MOCK_API_SCRIPT = `
         });
     };
 
-    console.log("[WE-Mock] Ready.");
+    // ============================================================
+    // 🎵 Audio Simulation Logic
+    // ============================================================
+    let audioContext;
+    let analyser;
+    let dataArray;
+    let micStream;
+    let audioSourceType = 'simulate';
+    let audioVolume = 50;
+
+    async function initMic() {
+        stopAudio();
+        if (audioContext) return;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            micStream = stream;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 128; 
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+        } catch (e) {
+            console.error("[WE-Mock] Mic Error:", e);
+            audioSourceType = 'simulate';
+        }
+    }
+
+    async function initSystemAudio() {
+        stopAudio();
+        if (audioContext) return;
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            micStream = stream;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 128; 
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+        } catch (e) {
+            console.error("[WE-Mock] System Audio Error:", e);
+            audioSourceType = 'simulate';
+        }
+    }
+
+    function stopAudio() {
+        if (micStream) {
+            micStream.getTracks().forEach(t => t.stop());
+            micStream = null;
+        }
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+        analyser = null;
+    }
+
+    function audioLoop() {
+        let audioData = new Array(64).fill(0);
+        
+        if (audioSourceType === 'simulate') {
+            const t = Date.now() / 1000;
+            for(let i=0; i<64; i++) {
+                let v = Math.max(0, Math.sin(i*0.1 + t*10) * 0.8);
+                v *= (1 - i/64);
+                v += Math.random() * 0.2; 
+                v *= (audioVolume / 100); // Apply volume
+                audioData[i] = Math.min(1, v);
+                audioData[i+64] = Math.min(1, v);
+            }
+        } else if ((audioSourceType === 'mic' || audioSourceType === 'system') && analyser) {
+            analyser.getByteFrequencyData(dataArray);
+            for (let i = 0; i < 64; i++) {
+                if (i < dataArray.length) {
+                    audioData[i] = (dataArray[i] / 255.0) * (audioVolume / 100);
+                }
+            }
+        } else if (audioSourceType === 'off') {
+            audioData.fill(0);
+        }
+
+        const finalData = new Array(128).fill(0);
+        for (let i = 0; i < 64; i++) {
+            finalData[i*2] = audioData[i];
+            finalData[i*2+1] = audioData[i];
+        }
+        
+        const cbs = window.__WE_CALLBACKS__;
+        if (cbs.audio) {
+            cbs.audio(finalData);
+        }
+
+        requestAnimationFrame(audioLoop);
+    }
+    audioLoop();
 
     // ============================================================
     // 🔌 WebSocket Connection (for Real-time Settings)
@@ -234,6 +329,17 @@ export const MOCK_API_SCRIPT = `
                         const cbs = window.__WE_CALLBACKS__;
                         if (cbs.properties && cbs.properties.applyUserProperties) {
                             cbs.properties.applyUserProperties(msg.data);
+                        }
+                    } else if (msg.type === 'UPDATE_GENERAL') {
+                        console.log('[WE-Mock] WS General Update:', msg.data);
+                        if (msg.data.audioSource !== undefined) {
+                            audioSourceType = msg.data.audioSource;
+                            if (audioSourceType === 'mic') initMic();
+                            else if (audioSourceType === 'system') initSystemAudio();
+                            else stopAudio();
+                        }
+                        if (msg.data.audioVolume !== undefined) {
+                            audioVolume = msg.data.audioVolume;
                         }
                     }
                 } catch (e) {
