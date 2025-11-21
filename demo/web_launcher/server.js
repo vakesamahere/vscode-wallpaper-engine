@@ -286,6 +286,41 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // --- [新增] API: 获取用于 srcdoc 的入口 HTML ---
+  if (reqUrl === "/api/get-entry") {
+    // 1. 寻找 index.html
+    let foundFile = null;
+    for (const basePath of searchPaths) {
+      const tryPath = path.join(basePath, "index.html");
+      if (fs.existsSync(tryPath)) {
+        foundFile = tryPath;
+        break;
+      }
+    }
+
+    if (foundFile) {
+      let content = fs.readFileSync(foundFile, "utf-8");
+
+      // 2. 注入 Base 标签 (这是视频能播放的关键)
+      // 指向服务器根目录，这样 src="video.webm" 就会变成 http://127.0.0.1:33333/video.webm
+      const baseTag = `<base href="http://127.0.0.1:${PORT}/" />`;
+
+      if (content.includes("<head>")) {
+        content = content.replace("<head>", "<head>" + baseTag);
+      } else {
+        content = baseTag + content;
+      }
+
+      // 3. 交给 serveFile 继续处理 (它会自动注入 jquery, mock-api.js 等)
+      serveFile(res, foundFile, "ENTRY", Buffer.from(content, "utf-8"));
+      return;
+    } else {
+      res.writeHead(404);
+      res.end("index.html not found");
+      return;
+    }
+  }
+
   // --- 静态文件路由 ---
   if (reqUrl === "/") {
     reqUrl = "/host.html";

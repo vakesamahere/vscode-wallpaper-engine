@@ -157,10 +157,13 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
             el.style.opacity = '${opacity}';
         `;
     } else if (type === WallpaperType.Web) {
-        const targetUrl = `http://127.0.0.1:${port}/index.html`;
         const pingUrl = `http://127.0.0.1:${port}/ping`;
+        const entryUrl = `http://127.0.0.1:${port}/api/get-entry`;
         
         elementCreationCode = `
+            const entryUrl = "${entryUrl}";
+            const pingUrl = "${pingUrl}";
+
             // 1. 创建 Loading 元素
             const loader = document.createElement('div');
             loader.innerHTML = '<div style="width: 30px; height: 30px; border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid #fff; border-radius: 50%; animation: vscode-wallpaper-spin 1s linear infinite;"></div>';
@@ -187,13 +190,40 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
             el.allow = "autoplay; fullscreen";
             el.style.opacity = '0'; // 初始隐藏
             el.style.transition = 'opacity 0.5s ease-in-out';
-            const targetUrl = "${targetUrl}";
+            
+            const srcdocContent = \`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <base href='http://127.0.0.1:${port}/' />
+                <style>body, html { margin: 0; padding: 0; overflow: hidden; background: black; }</style>
+            </head>
+            <body>
+                <script>
+                    fetch('${entryUrl}')
+                        .then(resp => {
+                            if(!resp.ok) throw new Error('Server not ready');
+                            return resp.text();
+                        })
+                        .then(html => {
+                            document.open();
+                            document.write(html);
+                            document.close();
+                        })
+                        .catch(err => {
+                            document.body.innerHTML = '<h1 style=color:red>Connection Failed</h1>';
+                            console.error('Wallpaper Load Error:', err);
+                        });
+                </script>
+            </body>
+            </html>
+            \`;
             
             async function checkHealthLoop() {
                 await new Promise(resolve => setTimeout(resolve, ${startupCheckInterval}));
                 let isHealthy = false;
                 try {
-                    const resp = await fetch("${pingUrl}", { method: 'GET', mode: 'no-cors' });
+                    const resp = await fetch(pingUrl, { method: 'GET', mode: 'no-cors' });
                     isHealthy = true;
                 } catch (e) {
                     console.warn("Wallpaper Engine: 等待服务器开启...", e);
@@ -201,7 +231,7 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
                 if (!isHealthy) {
                     checkHealthLoop();
                 } else {
-                    el.src = targetUrl;
+                    el.srcdoc = srcdocContent;
                     
                     // 加载完成后显示
                     el.onload = () => {
@@ -225,14 +255,14 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
                 while(true) {
                     await new Promise(resolve => setTimeout(resolve, 2000));
                     try {
-                        await fetch("${pingUrl}", { method: 'GET', mode: 'no-cors' });
+                        await fetch(pingUrl, { method: 'GET', mode: 'no-cors' });
                     } catch(e) {
                         console.warn("Wallpaper Engine: 服务器断开，重新等待...");
                         el.style.opacity = '0'; // 隐藏 iframe
                         // 重新显示 loader? 也可以
                         container.appendChild(loader);
                         
-                        el.src = 'about:blank';
+                        el.srcdoc = ''; // Clear content
                         checkHealthLoop();
                         break;
                     }

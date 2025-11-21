@@ -83,6 +83,45 @@ export class WallpaperServer {
                 return;
             }
 
+            // [New] API to get entry HTML (for srcdoc injection)
+            if (reqUrl === '/api/get-entry') {
+                const entryPath = path.join(safeRoot, 'index.html');
+                fs.readFile(entryPath, (err, data) => {
+                    if (err) {
+                        res.statusCode = 404;
+                        res.end('Entry Not Found');
+                        return;
+                    }
+                    let html = data.toString('utf-8');
+
+                    // [Fix] Video playback issue: Convert <video><source src="..."></video> to <video src="..."></video>
+                    // Regex explanation:
+                    // 1. (<video[^>]*)   : Match opening video tag and attributes
+                    // 2. (>[\s\S]*?)     : Match content between video tag and source tag (non-greedy)
+                    // 3. <source[^>]*\s+src=['"]([^'"]+)['"][^>]*> : Match source tag and capture src URL
+                    // 4. ([\s\S]*?<\/video>) : Match remaining content and closing video tag
+                    html = html.replace(/(<video[^>]*)(>[\s\S]*?)<source[^>]*\s+src=['"]([^'"]+)['"][^>]*>([\s\S]*?<\/video>)/gi, '$1 src="$3"$2$4');
+
+                    // Inject base tag and scripts
+                    const injection = `
+<base href="http://127.0.0.1:${this.PORT}/" />
+<script src="/vscode-wallpaper-engine-mock-api.js"></script>
+<script src="/vscode-wallpaper-engine-bootstrap.js"></script>
+`;
+                    if (html.includes('<head>')) {
+                        html = html.replace('<head>', '<head>' + injection);
+                    } else if (html.includes('<body>')) {
+                        html = html.replace('<body>', '<body>' + injection);
+                    } else {
+                        html = injection + html;
+                    }
+                    res.setHeader('Content-Type', 'text/html');
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.end(html);
+                });
+                return;
+            }
+
             fs.readFile(filePath, (err, data) => {
                 if (err) {
                     console.warn(`[Server 404] ${reqUrl}`);
@@ -118,8 +157,9 @@ export class WallpaperServer {
             });
         });
 
+        vscode.window.setStatusBarMessage(`Wallpaper Server: Running at port ${this.PORT}!`, 5000);
         // 启动监听
-        this.server.listen(this.PORT, '0.0.0.0', () => {
+        this.server.listen(this.PORT, '127.0.0.1', () => {
             console.log(`Wallpaper Server started on port ${this.PORT}`);
             if (!silent) {
                 // 开发阶段提示一下，确保你知道它起来了
@@ -134,6 +174,16 @@ export class WallpaperServer {
             } else {
                 vscode.window.showErrorMessage(`壁纸服务器启动失败: ${err.message}`);
             }
+        });
+
+        // 发一个 /ping 请求，确认服务器已启动
+        const req = http.get(`http://127.0.0.1:${this.PORT}/ping`, (res) => {
+            // log pong
+            vscode.window.setStatusBarMessage(`Wallpaper Server: Success ${res.statusCode}`, 5000);
+            res.resume();
+        });
+        req.on('error', (e) => {
+            vscode.window.setStatusBarMessage(`Wallpaper Server: Error starting server`, 5000);
         });
     }
 

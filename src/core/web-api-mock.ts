@@ -43,8 +43,11 @@ export const MOCK_API_SCRIPT = `
     };
 
     // 2. 模拟 module 和 exports (CommonJS 规范)
-    window.module = { exports: {} };
-    window.exports = window.module.exports;
+    // [FIX] Three.js 等库如果检测到 module/exports 会尝试导出而不是挂载到 window
+    // 所以这里必须显式设为 undefined，强制它们使用 Global 模式
+    window.module = undefined;
+    window.exports = undefined;
+    window.define = undefined;
 
     // 3. 模拟 process (用于检测环境变量)
     window.process = {
