@@ -18,6 +18,60 @@ const CSP_MARKER_END = '<!-- VSCode-Wallpaper-Injection-End -->';
 const ATTR_ORIGINAL = 'http-equiv="Content-Security-Policy"';
 const ATTR_RENAMED = 'http-equiv="Content-Security-Policy--replaced-by-wallpaper-engine-plugin"';
 
+// CSP abs content
+const CSP_ABS_CONTENT = `
+<meta charset="utf-8" />
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="
+			default-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+			;
+			img-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				data:
+				blob:
+				vscode-remote-resource:
+				vscode-managed-remote-resource:
+				https:
+			;
+			media-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+			;
+			frame-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				vscode-webview:
+			;
+			script-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				'unsafe-eval'
+				blob:
+			;
+			style-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				'unsafe-inline'
+			;
+			connect-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				https:
+				ws:
+			;
+			font-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				vscode-remote-resource:
+				vscode-managed-remote-resource:
+				https://*.vscode-unpkg.net
+			;
+		"/>
+`;
+
 function getWorkbenchPath(file: 'html' | 'js'): string | null {
     const root = vscode.env.appRoot;
     const basePaths = [
@@ -125,7 +179,7 @@ async function patchWorkbenchHtml() {
     const injectionBlock = `
 ${disabledTag}
 ${CSP_MARKER_START}
-${newTagContent}
+${CSP_ABS_CONTENT}
 ${CSP_MARKER_END}
 `;
     console.log("应用 CSP 补丁...");

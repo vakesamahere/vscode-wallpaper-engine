@@ -30,6 +30,10 @@
       {
         "command": "vscode-wallpaper-engine.uninstallWallpaper",
         "title": "Uninstall Wallpaper Engine: 卸载插件"
+      },
+      {
+        "command": "vscode-wallpaper-engine.openSettings",
+        "title": "Open Wallpaper Settings: 打开壁纸设置"
       }
     ],
     "configuration": {
@@ -92,6 +96,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.106.1",
+    "@types/ws": "^8.18.1",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "esbuild": "^0.27.0",
@@ -101,6 +106,7 @@
     "typescript-eslint": "^8.46.3"
   },
   "dependencies": {
-    "sudo-prompt": "^9.2.1"
+    "sudo-prompt": "^9.2.1",
+    "ws": "^8.18.3"
   }
 }

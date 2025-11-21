@@ -8,9 +8,10 @@ import { performInjection, restoreWorkbench } from './core/injector';
 import { WallpaperServer } from './core/server';
 import { WallpaperType } from './core/types';
 import { WALLPAPER_SERVER_PORT } from './config/constants';
+import { SettingsPanel } from './panels/setting-panel';
 
 // test
-import modifyDom from './playground/modify_dom';
+import { openTestPage } from './playground/page';
 
 const SHOW_DEBUG_SIDEBAR = false; // [Dev] Toggle Debug Sidebar
 
@@ -66,8 +67,8 @@ export function activate(context: vscode.ExtensionContext) {
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('vscode-wallpaper-engine.helloWorld', async () => {
-		await modifyDom();
+	const disposable = vscode.commands.registerCommand('vscode-wallpaper-engine.helloWorld', () => {
+		openTestPage();    
 	});
 	context.subscriptions.push(disposable);
 
@@ -144,6 +145,15 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
     context.subscriptions.push(uninstallCmd);
+
+    context.subscriptions.push(vscode.commands.registerCommand('vscode-wallpaper-engine.openSettings', () => {
+        if (server) {
+            vscode.window.showInformationMessage(`context.extensionUri: ${context.extensionUri}`);
+            SettingsPanel.createOrShow(context.extensionUri, server);
+        } else {
+            vscode.window.showErrorMessage('Wallpaper Server is not running.');
+        }
+    }));
 }
 
 // This method is called when your extension is deactivated

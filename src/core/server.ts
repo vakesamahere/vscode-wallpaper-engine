@@ -3,11 +3,13 @@ import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { WebSocket, WebSocketServer } from 'ws';
 import { WALLPAPER_SERVER_PORT } from '../config/constants';
 import { MOCK_API_SCRIPT, BOOTSTRAP_SCRIPT } from './web-api-mock';
 
 export class WallpaperServer {
     private server: http.Server | null = null;
+    private wss: WebSocketServer | null = null;
     private currentRoot: string = '';
     private retryInterval: NodeJS.Timeout | null = null;
     // 端口必须与 injector.ts 里的保持一致
@@ -15,6 +17,9 @@ export class WallpaperServer {
 
     private searchPaths: string[] = [];
     private workshopBasePath: string | null = null;
+
+    private shutdownTimeout: NodeJS.Timeout | null = null;
+    private readonly SHUTDOWN_DELAY = 2 * 60 * 1000; // 2 minutes
 
     constructor(private context: vscode.ExtensionContext) {
         // 插件启动时，尝试恢复之前的服务器状态
@@ -24,8 +29,18 @@ export class WallpaperServer {
             // 获取配置的端口
             const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
             const port = config.get<number>('serverPort') || WALLPAPER_SERVER_PORT;
-            this.start(lastPath, port, true); // true 表示这是静默启动，不弹窗
+            // this.start(lastPath, port, true); // true 表示这是静默启动，不弹窗
         }
+    }
+
+    private resetShutdownTimer() {
+        if (this.shutdownTimeout) {
+            clearTimeout(this.shutdownTimeout);
+        }
+        this.shutdownTimeout = setTimeout(() => {
+            console.log('[Server] Auto-shutdown due to inactivity.');
+            this.stop();
+        }, this.SHUTDOWN_DELAY);
     }
 
     // [修改] 变成 async，确保状态保存完毕
@@ -34,7 +49,7 @@ export class WallpaperServer {
         vscode.window.setStatusBarMessage(`Preparing Wallpaper Server...`, 5000);
         // 如果路径没变且服务器开着，跳过
         if (this.server && this.currentRoot === rootPath) {
-            // return;
+            return;
         }
 
         // 关闭旧服务
@@ -46,8 +61,13 @@ export class WallpaperServer {
         await this.context.globalState.update('currentWallpaperPath', rootPath);
 
         this.updateSearchPaths(rootPath); // [New] Update search paths on server start
+        
+        this.resetShutdownTimer(); // Start the timer
 
+        console.log(`[Server] Starting server at port ${this.PORT} for root: ${this.currentRoot}`);
         this.server = http.createServer((req, res) => {
+            this.resetShutdownTimer(); // Reset timer on every request
+
             const safeRoot = path.normalize(this.currentRoot);
             // 简单的 URL 处理
             let reqUrl = req.url ? decodeURIComponent(req.url.split('?')[0]) : '/';
@@ -422,6 +442,29 @@ export class WallpaperServer {
             }
         });
 
+        // Initialize WebSocket Server
+        try {
+            console.log(`[Server] Initializing WebSocket Server`);
+            this.wss = new WebSocketServer({ noServer: true });
+            
+            this.server.on('upgrade', (request, socket, head) => {
+                this.wss?.handleUpgrade(request, socket, head, (ws) => {
+                    this.wss?.emit('connection', ws, request);
+                });
+            });
+
+            this.wss.on('connection', (ws) => {
+                console.log('[Server] WebSocket connected');
+                ws.on('message', (message) => {
+                    // Optional: Handle messages from clients
+                });
+            });
+        } catch (e) {
+            console.error('[Server] Failed to initialize WebSocket Server:', e);
+            vscode.window.showErrorMessage('Failed to start WebSocket Server. Real-time settings will not work.');
+        }
+        
+        console.log(`[Server] Setting up server listeners`);
         vscode.window.setStatusBarMessage(`Wallpaper Server: Running at port ${this.PORT}!`, 5000);
         // 启动监听
         this.server.listen(this.PORT, '127.0.0.1', () => {
@@ -442,13 +485,16 @@ export class WallpaperServer {
         });
 
         // 发一个 /ping 请求，确认服务器已启动
+        console.log(`[Server] Sending /ping request to confirm server startup`);
         const req = http.get(`http://127.0.0.1:${this.PORT}/ping`, (res) => {
             // log pong
             vscode.window.setStatusBarMessage(`Wallpaper Server: Success ${res.statusCode}`, 5000);
+            console.log(`[Server] Received /ping response with status: ${res.statusCode}`);
             res.resume();
         });
         req.on('error', (e) => {
             vscode.window.setStatusBarMessage(`Wallpaper Server: Error starting server`, 5000);
+            console.log(`[Server] /ping request error: ${e.message}`);
         });
     }
 
@@ -548,6 +594,14 @@ export class WallpaperServer {
     }
 
     public stop() {
+        if (this.shutdownTimeout) {
+            clearTimeout(this.shutdownTimeout);
+            this.shutdownTimeout = null;
+        }
+        if (this.wss) {
+            this.wss.close();
+            this.wss = null;
+        }
         if (this.retryInterval) {
             clearInterval(this.retryInterval);
             this.retryInterval = null;
@@ -555,6 +609,18 @@ export class WallpaperServer {
         if (this.server) {
             this.server.close();
             this.server = null;
+        }
+        console.log('[Server] Server stopped.');
+    }
+
+    public broadcast(data: any) {
+        if (this.wss) {
+            const msg = JSON.stringify(data);
+            this.wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(msg);
+                }
+            });
         }
     }
 

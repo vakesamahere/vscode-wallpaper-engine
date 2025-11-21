@@ -1,0 +1,6 @@
+body { background-color: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-font-family); padding: 20px; }
+.control-item { margin-bottom: 15px; }
+label { display: block; margin-bottom: 5px; color: var(--vscode-descriptionForeground); }
+input[type="range"], input[type="text"], select { width: 100%; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
+button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 8px 12px; cursor: pointer; }
+button:hover { background: var(--vscode-button-hoverBackground); }

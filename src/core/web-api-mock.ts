@@ -207,6 +207,43 @@ export const MOCK_API_SCRIPT = `
     };
 
     console.log("[WE-Mock] Ready.");
+
+    // ============================================================
+    // 🔌 WebSocket Connection (for Real-time Settings)
+    // ============================================================
+    (function() {
+        try {
+            let host = location.host;
+            if (!host) {
+                const base = document.querySelector('base');
+                if (base && base.href) {
+                    try {
+                        host = new URL(base.href).host;
+                    } catch (e) {}
+                }
+            }
+            if (!host) host = '127.0.0.1:23333'; // Fallback
+
+            const ws = new WebSocket('ws://' + host);
+            ws.onopen = () => console.log('[WE-Mock] WebSocket Connected');
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'UPDATE_PROPERTIES' || msg.type === 'PROPERTIES') {
+                        console.log('[WE-Mock] WS Property Update:', msg.data);
+                        const cbs = window.__WE_CALLBACKS__;
+                        if (cbs.properties && cbs.properties.applyUserProperties) {
+                            cbs.properties.applyUserProperties(msg.data);
+                        }
+                    }
+                } catch (e) {
+                    console.error('[WE-Mock] WS Message Error:', e);
+                }
+            };
+        } catch (e) {
+            console.error('[WE-Mock] WebSocket Init Error:', e);
+        }
+    })();
 })();
 `;
 
