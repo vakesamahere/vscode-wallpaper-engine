@@ -16,8 +16,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "vscode-wallpaper-engine.helloWorld",
-        "title": "Hello World"
+        "command": "vscode-wallpaper-engine.refreshWallpaper",
+        "title": "Refresh Wallpaper: 刷新壁纸"
       },
       {
         "command": "vscode-wallpaper-engine.setWallpaper",
@@ -30,6 +30,10 @@
       {
         "command": "vscode-wallpaper-engine.uninstallWallpaper",
         "title": "Uninstall Wallpaper Engine: 卸载插件"
+      },
+      {
+        "command": "vscode-wallpaper-engine.openSettings",
+        "title": "Open Wallpaper Settings: 打开壁纸设置"
       }
     ],
     "configuration": {
@@ -70,6 +74,39 @@
           "default": "",
           "description": "自定义注入的 JavaScript 代码 (将在壁纸加载后执行)",
           "editPresentation": "multilineText"
+        },
+        "vscode-wallpaper-engine.customCss": {
+          "type": "string",
+          "default": "",
+          "description": "自定义注入的 CSS 代码",
+          "editPresentation": "multilineText"
+        },
+        "vscode-wallpaper-engine.transparencyEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否启用 UI 透明化"
+        },
+        "vscode-wallpaper-engine.transparencyBaseColor": {
+          "type": "string",
+          "default": "",
+          "description": "透明化时的基底颜色 (Hex 格式, 例如 #1e1e1e)。留空则根据主题自动选择黑色或白色。"
+        },
+        "vscode-wallpaper-engine.transparencyRules": {
+          "type": "object",
+          "default": {
+            "editor.background": 0,
+            "editorGroup.emptyBackground": 0,
+            "editorGroupHeader.tabsBackground": 0,
+            "sideBar.background": 0,
+            "panel.background": 0,
+            "terminal.background": 0
+          },
+          "description": "UI 元素透明度规则 (Key: UI Element, Value: Opacity 0-1)",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
         }
       }
     }
@@ -92,6 +129,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/vscode": "^1.106.1",
+    "@types/ws": "^8.18.1",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "esbuild": "^0.27.0",
@@ -101,6 +139,7 @@
     "typescript-eslint": "^8.46.3"
   },
   "dependencies": {
-    "sudo-prompt": "^9.2.1"
+    "sudo-prompt": "^9.2.1",
+    "ws": "^8.18.3"
   }
 }

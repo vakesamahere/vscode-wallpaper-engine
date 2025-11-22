@@ -42,7 +42,7 @@ suite('Scanner Test Suite', () => {
         fs.writeFileSync(path.join(wpDir, 'project.json'), JSON.stringify({
             title: 'Invalid Wallpaper',
             file: 'scene.pkg',
-            type: 'scene' // Not in allowed list
+            type: 'unknown_type' // Not in allowed list
         }));
 
         const items = scanWallpapers(tempDir);

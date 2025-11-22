@@ -138,6 +138,16 @@ export const MOCK_API_SCRIPT = `
         else if (type === 'AUDIO_TICK' && cbs.audio) {
             cbs.audio(data);
         }
+        else if (type === 'UPDATE_GENERAL') {
+            console.log('[WE-Mock] PostMessage General Update:', data);
+            if (data.audioSource !== undefined) {
+                window.parent.postMessage({ type: 'CHANGE_AUDIO_SOURCE', source: data.audioSource }, '*');
+                audioSourceType = 'external';
+            }
+            if (data.audioVolume !== undefined) {
+                audioVolume = data.audioVolume;
+            }
+        }
         else if (type === 'INIT_GENERAL' && cbs.general) {
             if (cbs.general.applyGeneralProperties) {
                 cbs.general.applyGeneralProperties({ fps: 60, isActive: true });
@@ -206,7 +216,153 @@ export const MOCK_API_SCRIPT = `
         });
     };
 
-    console.log("[WE-Mock] Ready.");
+    // ============================================================
+    // 🎵 Audio Simulation Logic
+    // ============================================================
+    let audioContext;
+    let analyser;
+    let dataArray;
+    let micStream;
+    let audioSourceType = 'off';
+    let audioVolume = 50;
+
+    async function initMic() {
+        stopAudio();
+        if (audioContext) return;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            micStream = stream;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 128; 
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+        } catch (e) {
+            console.error("[WE-Mock] Mic Error:", e);
+            audioSourceType = 'simulate';
+        }
+    }
+
+    async function initSystemAudio() {
+        stopAudio();
+        if (audioContext) return;
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+            micStream = stream;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(stream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 128; 
+            source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+        } catch (e) {
+            console.error("[WE-Mock] System Audio Error:", e);
+            audioSourceType = 'simulate';
+        }
+    }
+
+    function stopAudio() {
+        if (micStream) {
+            micStream.getTracks().forEach(t => t.stop());
+            micStream = null;
+        }
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+        analyser = null;
+    }
+
+    function audioLoop() {
+        if (audioSourceType === 'external') {
+            requestAnimationFrame(audioLoop);
+            return;
+        }
+
+        let audioData = new Array(64).fill(0);
+        
+        if (audioSourceType === 'simulate') {
+            const t = Date.now() / 1000;
+            for(let i=0; i<64; i++) {
+                let v = Math.max(0, Math.sin(i*0.1 + t*10) * 0.8);
+                v *= (1 - i/64);
+                v += Math.random() * 0.2; 
+                v *= (audioVolume / 100); // Apply volume
+                audioData[i] = Math.min(1, v);
+                audioData[i+64] = Math.min(1, v);
+            }
+        } else if ((audioSourceType === 'mic' || audioSourceType === 'system') && analyser) {
+            analyser.getByteFrequencyData(dataArray);
+            for (let i = 0; i < 64; i++) {
+                if (i < dataArray.length) {
+                    audioData[i] = (dataArray[i] / 255.0) * (audioVolume / 100);
+                }
+            }
+        } else if (audioSourceType === 'off') {
+            audioData.fill(0);
+        }
+
+        const finalData = new Array(128).fill(0);
+        for (let i = 0; i < 64; i++) {
+            finalData[i*2] = audioData[i];
+            finalData[i*2+1] = audioData[i];
+        }
+        
+        const cbs = window.__WE_CALLBACKS__;
+        if (cbs.audio) {
+            cbs.audio(finalData);
+        }
+
+        requestAnimationFrame(audioLoop);
+    }
+    audioLoop();
+
+    // ============================================================
+    // 🔌 WebSocket Connection (for Real-time Settings)
+    // ============================================================
+    (function() {
+        try {
+            let host = location.host;
+            if (!host) {
+                const base = document.querySelector('base');
+                if (base && base.href) {
+                    try {
+                        host = new URL(base.href).host;
+                    } catch (e) {}
+                }
+            }
+            if (!host) host = '127.0.0.1:23333'; // Fallback
+
+            const ws = new WebSocket('ws://' + host);
+            ws.onopen = () => console.log('[WE-Mock] WebSocket Connected');
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'UPDATE_PROPERTIES' || msg.type === 'PROPERTIES') {
+                        console.log('[WE-Mock] WS Property Update:', msg.data);
+                        const cbs = window.__WE_CALLBACKS__;
+                        if (cbs.properties && cbs.properties.applyUserProperties) {
+                            cbs.properties.applyUserProperties(msg.data);
+                        }
+                    } else if (msg.type === 'UPDATE_GENERAL') {
+                        console.log('[WE-Mock] WS General Update:', msg.data);
+                        if (msg.data.audioSource !== undefined) {
+                            window.parent.postMessage({ type: 'CHANGE_AUDIO_SOURCE', source: msg.data.audioSource }, '*');
+                            audioSourceType = 'external';
+                        }
+                        if (msg.data.audioVolume !== undefined) {
+                            audioVolume = msg.data.audioVolume;
+                        }
+                    }
+                } catch (e) {
+                    console.error('[WE-Mock] WS Message Error:', e);
+                }
+            };
+        } catch (e) {
+            console.error('[WE-Mock] WebSocket Init Error:', e);
+        }
+    })();
 })();
 `;
 

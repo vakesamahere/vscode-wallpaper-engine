@@ -18,6 +18,60 @@ const CSP_MARKER_END = '<!-- VSCode-Wallpaper-Injection-End -->';
 const ATTR_ORIGINAL = 'http-equiv="Content-Security-Policy"';
 const ATTR_RENAMED = 'http-equiv="Content-Security-Policy--replaced-by-wallpaper-engine-plugin"';
 
+// CSP abs content
+const CSP_ABS_CONTENT = `
+<meta charset="utf-8" />
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="
+			default-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+			;
+			img-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				data:
+				blob:
+				vscode-remote-resource:
+				vscode-managed-remote-resource:
+				https:
+			;
+			media-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+			;
+			frame-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				vscode-webview:
+			;
+			script-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				'unsafe-eval'
+				blob:
+			;
+			style-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				'unsafe-inline'
+			;
+			connect-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				https:
+				ws:
+			;
+			font-src
+				* 'unsafe-inline' 'unsafe-eval' vscode-file: file: data: blob: http: https: ws: wss:
+				'self'
+				vscode-remote-resource:
+				vscode-managed-remote-resource:
+				https://*.vscode-unpkg.net
+			;
+		"/>
+`;
+
 function getWorkbenchPath(file: 'html' | 'js'): string | null {
     const root = vscode.env.appRoot;
     const basePaths = [
@@ -31,6 +85,17 @@ function getWorkbenchPath(file: 'html' | 'js'): string | null {
         if (fs.existsSync(fullPath)) { return fullPath; }
     }
     return null;
+}
+
+export function isPatched(): boolean {
+    const jsPath = getWorkbenchPath('js');
+    if (!jsPath) { return false; }
+    try {
+        const js = fs.readFileSync(jsPath, 'utf-8');
+        return js.includes('/* [VSCode-Wallpaper-Injection-Start] */');
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -125,7 +190,7 @@ async function patchWorkbenchHtml() {
     const injectionBlock = `
 ${disabledTag}
 ${CSP_MARKER_START}
-${newTagContent}
+${CSP_ABS_CONTENT}
 ${CSP_MARKER_END}
 `;
     console.log("应用 CSP 补丁...");
@@ -187,7 +252,7 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
             el = document.createElement('iframe');
             el.className = 'vscode-wallpaper-iframe';
             el.frameBorder = '0';
-            el.allow = "autoplay; fullscreen";
+            el.allow = "autoplay; fullscreen; microphone; display-capture";
             el.style.opacity = '0'; // 初始隐藏
             el.style.transition = 'opacity 0.5s ease-in-out';
             
@@ -200,85 +265,62 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
             </head>
             <body>
                 <script>
-                    fetch('${entryUrl}')
-                        .then(resp => {
-                            if(!resp.ok) throw new Error('Server not ready');
-                            return resp.text();
-                        })
-                        .then(html => {
-                            document.open();
-                            document.write(html);
-                            document.close();
-                        })
-                        .catch(err => {
-                            document.body.innerHTML = '<h1 style=color:red>Connection Failed</h1>';
-                            console.error('Wallpaper Load Error:', err);
-                        });
+                    const entryUrl = '${entryUrl}';
+                    async function loadWallpaper() {
+                        let attempts = 0;
+                        while(attempts < 20) {
+                            try {
+                                const resp = await fetch(entryUrl);
+                                if(!resp.ok) throw new Error('Server not ready');
+                                const html = await resp.text();
+                                document.open();
+                                document.write(html);
+                                document.close();
+                                return;
+                            } catch(err) {
+                                console.warn('Wallpaper Load Retry:', err);
+                                attempts++;
+                                await new Promise(r => setTimeout(r, 500));
+                            }
+                        }
+                        document.body.innerHTML = '<h1 style=color:red>Connection Failed</h1>';
+                    }
+                    loadWallpaper();
                 </script>
             </body>
             </html>
             \`;
             
-            async function checkHealthLoop() {
-                await new Promise(resolve => setTimeout(resolve, ${startupCheckInterval}));
-                let isHealthy = false;
-                try {
-                    const resp = await fetch(pingUrl, { method: 'GET', mode: 'no-cors' });
-                    isHealthy = true;
-                } catch (e) {
-                    console.warn("Wallpaper Engine: 等待服务器开启...", e);
-                }
-                if (!isHealthy) {
-                    checkHealthLoop();
-                } else {
-                    
-                    // 超时兜底 (3秒)
-                    setTimeout(() => {
-                        if (el.style.opacity === '0') {
-                            el.style.opacity = '${opacity}';
-                            if (loader.parentNode) loader.remove();
-                        }
-                    }, 3000);
+            // Expose control functions to global scope
+            window.reloadWallpaper = () => {
+                el.srcdoc = srcdocContent;
+            };
+            
+            window.showWallpaper = () => {
+                el.style.opacity = '${opacity}';
+                if (loader.parentNode) loader.remove();
+            };
+            
+            window.hideWallpaper = () => {
+                el.style.opacity = '0';
+                container.appendChild(loader);
+            };
 
-                    monitorServer();
-                    
-                    // [New] Start Sidebar after server is ready
-                    if (typeof initSidebar === 'function') {
-                        console.log("[Sidebar] Server ready, initializing sidebar...");
-                        initSidebar();
-                    }
-                    // wait for a short moment to ensure iframe is ready
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    el.srcdoc = srcdocContent;
-                    
-                    // 加载完成后显示
-                    el.onload = () => {
-                        el.style.opacity = '${opacity}';
-                        if (loader.parentNode) loader.remove();
-                    };
-                }
-            }
-
-            async function monitorServer() {
-                while(true) {
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    try {
-                        await fetch(pingUrl, { method: 'GET', mode: 'no-cors' });
-                    } catch(e) {
-                        console.warn("Wallpaper Engine: 服务器断开，重新等待...");
-                        el.style.opacity = '0'; // 隐藏 iframe
-                        // 重新显示 loader? 也可以
-                        container.appendChild(loader);
-                        
-                        el.srcdoc = ''; // Clear content
-                        checkHealthLoop();
-                        break;
-                    }
-                }
-            }
-            checkHealthLoop();
+            el.onload = () => {
+                window.showWallpaper();
+            };
         `;
     }
+
+    const SIDEBAR_CSS = `
+    #vscode-wallpaper-sidebar input[type="range"], #vscode-wallpaper-sidebar input[type="color"], #vscode-wallpaper-sidebar select { width: 100%; background: #3c3c3c; border: 1px solid #555; color: white; margin-top: 5px; }
+    #vscode-wallpaper-sidebar .control-item { margin-bottom: 15px; }
+    #vscode-wallpaper-sidebar label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+    #vscode-wallpaper-sidebar span.val { float: right; font-size: 11px; color: #007acc; }
+    ${(()=>{if (showDebugSidebar) {return "";} else {
+        return "#vscode-wallpaper-sidebar { display: none !important; } #vscode-wallpaper-sidebar + #sidebar-open-btn { display: none !important; }";
+    }})()}
+    `;
 
     const jsInjection = `
 /* [VSCode-Wallpaper-Injection-Start] */
@@ -294,13 +336,86 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
         container.style.left = '0'; 
         container.style.width = '100%'; 
         container.style.height = '100%';
-        container.style.zIndex = '99999';
+        container.style.zIndex = '-1';
         container.style.pointerEvents = 'none';
         container.style.opacity = '1';
         container.style.display = 'flex';
 
+        const SERVER_ROOT = 'http://127.0.0.1:${port}';
+        const PING_URL = SERVER_ROOT + '/ping';
+        const CONFIG_URL = SERVER_ROOT + '/config';
+
+        // Inject Transparency CSS
+        const transparencyStyle = document.createElement('style');
+        transparencyStyle.id = 'vscode-wallpaper-transparency';
+        document.head.appendChild(transparencyStyle);
+
+        async function updateCss() {
+            try {
+                console.log("[WP style inj] Fetching config from " + CONFIG_URL);
+                const res = await fetch(CONFIG_URL);
+                if (res.ok) {
+                    const config = await res.json();
+                    console.log("[WP style inj] Got config:", config);
+                    const css = config.customCss;
+                    
+                    if (transparencyStyle.textContent !== css) {
+                        console.log("[WP style inj] Updating style tag content...");
+                        transparencyStyle.textContent = css;
+                        console.log("[WP style inj] Update complete.");
+                    } else {
+                        console.log("[WP style inj] CSS is identical, skipping update.");
+                    }
+                } else {
+                    console.error("[WP style inj] Fetch failed status:", res.status);
+                }
+            } catch (e) { console.error("[WP style inj] CSS Update Failed", e); }
+        }
+
+        async function mainLoop() {
+            // 1. Wait for server
+            const start = Date.now();
+            while (true) {
+                try {
+                    const resp = await fetch(PING_URL, { method: 'GET', mode: 'cors' });
+                    if (resp.ok || resp.status === 205) {
+                        console.log("[WP] Server is ready!");
+                        break;
+                    }
+                } catch (e) { }
+                await new Promise(resolve => setTimeout(resolve, 200));
+                if (Date.now() - start > 30000) { console.error("[WP] Server timeout"); return; }
+            }
+
+            // 2. Initialize
+            await updateCss();
+            if (typeof initSidebar === 'function') initSidebar();
+            if (window.reloadWallpaper) window.reloadWallpaper();
+            
+            // 3. Monitor Loop
+            while(true) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                try {
+                    const resp = await fetch(PING_URL, { method: 'GET', mode: 'cors' });
+                    if (resp.status === 205) {
+                        console.log("[WP style inj] Reload signal received (205).");
+                        await updateCss();
+                        if (window.reloadWallpaper) window.reloadWallpaper();
+                    }
+                } catch(e) {
+                    console.warn("[WP] Server disconnected...");
+                    if (window.hideWallpaper) window.hideWallpaper();
+                    // Re-enter wait loop
+                    mainLoop(); 
+                    return;
+                }
+            }
+        }
+        
+        mainLoop();
+
         // Sidebar
-        if (${showDebugSidebar}) {
+        if (true) {
             // container.style.pointerEvents = 'auto';
             
             // Use insertAdjacentHTML to handle multiple root elements correctly
@@ -470,13 +585,6 @@ const SIDEBAR_HTML = `
 </button>
 `;
 
-const SIDEBAR_CSS = `
-#vscode-wallpaper-sidebar input[type="range"], #vscode-wallpaper-sidebar input[type="color"], #vscode-wallpaper-sidebar select { width: 100%; background: #3c3c3c; border: 1px solid #555; color: white; margin-top: 5px; }
-#vscode-wallpaper-sidebar .control-item { margin-bottom: 15px; }
-#vscode-wallpaper-sidebar label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
-#vscode-wallpaper-sidebar span.val { float: right; font-size: 11px; color: #007acc; }
-`;
-
 const SIDEBAR_JS_LOGIC = `
     function getSafeValue(p) {
         if (p.value !== undefined && p.value !== null) return p.value;
@@ -576,17 +684,29 @@ const SIDEBAR_JS_LOGIC = `
     let analyser;
     let dataArray;
     let micStream;
-    let audioSourceType = 'simulate';
+    let audioSourceType = 'off';
 
     const audioSelect = document.getElementById('audioSource');
-    if (audioSelect) {
-        audioSelect.onchange = (e) => {
-            audioSourceType = e.target.value;
-            if (audioSourceType === 'mic') initMic();
-            else if (audioSourceType === 'system') initSystemAudio();
-            else stopAudio();
-        };
+    
+    function setAudioSource(val) {
+        audioSourceType = val;
+        if (audioSelect) audioSelect.value = val;
+        if (audioSourceType === 'mic') initMic();
+        else if (audioSourceType === 'system') initSystemAudio();
+        else stopAudio();
     }
+
+    if (audioSelect) {
+        audioSelect.onchange = (e) => setAudioSource(e.target.value);
+    }
+
+    // Listen for requests from Iframe (forwarded from Settings Panel)
+    window.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'CHANGE_AUDIO_SOURCE') {
+            console.log("[Sidebar] Received audio source change request:", e.data.source);
+            setAudioSource(e.data.source);
+        }
+    });
 
     async function initMic() {
         stopAudio();
@@ -643,9 +763,12 @@ const SIDEBAR_JS_LOGIC = `
         
         if (audioSourceType === 'simulate') {
             const t = Date.now() / 1000;
-            for (let i = 0; i < 64; i++) {
-                const v = Math.sin(t * 5 + i * 0.1) * 0.5 + 0.5;
-                audioData[i] = v; // 0..1
+            for(let i=0; i<64; i++) {
+                let v = Math.max(0, Math.sin(i*0.1 + t*10) * 0.8);
+                v *= (1 - i/64);
+                v += Math.random() * 0.2; 
+                audioData[i] = Math.min(1, v);
+                audioData[i+64] = Math.min(1, v);
             }
         } else if ((audioSourceType === 'mic' || audioSourceType === 'system') && analyser) {
             analyser.getByteFrequencyData(dataArray);

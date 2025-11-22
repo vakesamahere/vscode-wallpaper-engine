@@ -3,11 +3,13 @@ import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { WebSocket, WebSocketServer } from 'ws';
 import { WALLPAPER_SERVER_PORT } from '../config/constants';
 import { MOCK_API_SCRIPT, BOOTSTRAP_SCRIPT } from './web-api-mock';
 
 export class WallpaperServer {
     private server: http.Server | null = null;
+    private wss: WebSocketServer | null = null;
     private currentRoot: string = '';
     private retryInterval: NodeJS.Timeout | null = null;
     // 端口必须与 injector.ts 里的保持一致
@@ -15,6 +17,19 @@ export class WallpaperServer {
 
     private searchPaths: string[] = [];
     private workshopBasePath: string | null = null;
+    private reloadFlag = false; // [New] Flag to trigger client reload
+
+    private shutdownTimeout: NodeJS.Timeout | null = null;
+    private readonly SHUTDOWN_DELAY = 2 * 60 * 1000; // 2 minutes
+    private entryFile: string | null = null;
+
+    private cssConfig = {
+        customCss: ''
+    };
+
+    public updateCssConfig(config: { customCss: string }) {
+        this.cssConfig = config;
+    }
 
     constructor(private context: vscode.ExtensionContext) {
         // 插件启动时，尝试恢复之前的服务器状态
@@ -24,17 +39,97 @@ export class WallpaperServer {
             // 获取配置的端口
             const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
             const port = config.get<number>('serverPort') || WALLPAPER_SERVER_PORT;
-            this.start(lastPath, port, true); // true 表示这是静默启动，不弹窗
+            // this.start(lastPath, port, true); // true 表示这是静默启动，不弹窗
         }
     }
 
+    private resetShutdownTimer() {
+        if (this.shutdownTimeout) {
+            clearTimeout(this.shutdownTimeout);
+        }
+        this.shutdownTimeout = setTimeout(() => {
+            console.log('[Server] Auto-shutdown due to inactivity.');
+            this.stop();
+        }, this.SHUTDOWN_DELAY);
+    }
+
+    public triggerReload() {
+        this.reloadFlag = true;
+    }
+
+    private checkServerStatus(port: number): Promise<{ running: boolean, rootPath: string } | null> {
+        return new Promise((resolve) => {
+            const req = http.get(`http://127.0.0.1:${port}/status`, (res) => {
+                if (res.statusCode !== 200) {
+                    resolve(null);
+                    return;
+                }
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch {
+                        resolve(null);
+                    }
+                });
+            });
+            req.on('error', () => resolve(null));
+            req.setTimeout(500, () => {
+                req.destroy();
+                resolve(null);
+            });
+        });
+    }
+
+    private shutdownRemoteServer(port: number): Promise<void> {
+        return new Promise((resolve) => {
+            const req = http.get(`http://127.0.0.1:${port}/shutdown`, (res) => {
+                resolve();
+            });
+            req.on('error', () => resolve());
+            req.setTimeout(1000, () => {
+                req.destroy();
+                resolve();
+            });
+        });
+    }
+
     // [修改] 变成 async，确保状态保存完毕
-    public async start(rootPath: string, port: number, silent = false) {
+    public async start(rootPath: string, port: number, entryFile?: string, silent = false) {
         this.PORT = port;
         vscode.window.setStatusBarMessage(`Preparing Wallpaper Server...`, 5000);
-        // 如果路径没变且服务器开着，跳过
-        if (this.server && this.currentRoot === rootPath) {
-            // return;
+        
+        // 1. Check local instance
+        if (this.server) {
+            if (this.currentRoot === rootPath && this.entryFile === (entryFile || null)) {
+                return;
+            } else {
+                console.log(`[Server] Hot swapping root to ${rootPath}`);
+                this.currentRoot = rootPath;
+                this.entryFile = entryFile || null;
+                await this.context.globalState.update('currentWallpaperPath', rootPath);
+                this.updateSearchPaths(rootPath);
+                this.triggerReload();
+                return;
+            }
+        }
+
+        // 2. Check external instance (Multi-window support)
+        const status = await this.checkServerStatus(port);
+        if (status && status.running) {
+            if (status.rootPath === rootPath) {
+                console.log(`[Server] Reusing existing server for ${rootPath}`);
+                this.currentRoot = rootPath;
+                // Even if we reuse, we should ensure global state is synced
+                await this.context.globalState.update('currentWallpaperPath', rootPath);
+                return;
+            } else {
+                console.log(`[Server] Existing server running different path (${status.rootPath}). Restarting...`);
+                await this.shutdownRemoteServer(port);
+                // Wait for port to be released
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
 
         // 关闭旧服务
@@ -46,8 +141,13 @@ export class WallpaperServer {
         await this.context.globalState.update('currentWallpaperPath', rootPath);
 
         this.updateSearchPaths(rootPath); // [New] Update search paths on server start
+        
+        this.resetShutdownTimer(); // Start the timer
 
+        console.log(`[Server] Starting server at port ${this.PORT} for root: ${this.currentRoot}`);
         this.server = http.createServer((req, res) => {
+            this.resetShutdownTimer(); // Reset timer on every request
+
             const safeRoot = path.normalize(this.currentRoot);
             // 简单的 URL 处理
             let reqUrl = req.url ? decodeURIComponent(req.url.split('?')[0]) : '/';
@@ -65,8 +165,38 @@ export class WallpaperServer {
 
             // ping，用于检测服务器是否在线，直接返回 200
             if (reqUrl === '/ping') {
-                res.statusCode = 200;
-                res.end('pong');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                if (this.reloadFlag) {
+                    console.log('[Server] Sending 205 Reload signal to client');
+                    this.reloadFlag = false;
+                    res.statusCode = 205; // Reset Content
+                    res.end('reload');
+                } else {
+                    res.statusCode = 200;
+                    res.end('pong');
+                }
+                return;
+            }
+
+            // [New] Status endpoint for multi-instance check
+            if (reqUrl === '/status') {
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end(JSON.stringify({
+                    running: true,
+                    rootPath: this.currentRoot
+                }));
+                return;
+            }
+
+            // [New] Shutdown endpoint for multi-instance takeover
+            if (reqUrl === '/shutdown') {
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end('ok');
+                setTimeout(() => {
+                    console.log('[Server] Remote shutdown requested.');
+                    this.stop();
+                }, 100);
                 return;
             }
 
@@ -86,19 +216,69 @@ export class WallpaperServer {
                 return;
             }
 
+            if (reqUrl === '/config') {
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end(JSON.stringify(this.cssConfig));
+                return;
+            }
+
             // [New] API to get entry HTML (for srcdoc injection)
             if (reqUrl === '/api/get-entry') {
                 let entryPath = '';
-                for (const basePath of this.searchPaths) {
-                    const tryPath = path.join(basePath, 'index.html');
-                    if (fs.existsSync(tryPath)) {
-                        entryPath = tryPath;
-                        break;
+                
+                if (this.entryFile) {
+                    // If entryFile is provided (Video/Image/Explicit Web)
+                    // Check if it's a media file
+                    const ext = path.extname(this.entryFile).toLowerCase();
+                    if (['.mp4', '.webm', '.mkv', '.avi', '.mov'].includes(ext)) {
+                        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <style>body, html { margin: 0; padding: 0; overflow: hidden; background: black; width: 100%; height: 100%; } video { width: 100%; height: 100%; object-fit: cover; }</style>
+</head>
+<body>
+    <video src="${this.entryFile}" autoplay loop muted playsinline></video>
+</body>
+</html>`;
+                        res.setHeader('Content-Type', 'text/html');
+                        res.setHeader('Access-Control-Allow-Origin', '*');
+                        res.end(html);
+                        return;
+                    } else if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) {
+                        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <style>body, html { margin: 0; padding: 0; overflow: hidden; background: black; width: 100%; height: 100%; } img { width: 100%; height: 100%; object-fit: cover; }</style>
+</head>
+<body>
+    <img src="${this.entryFile}">
+</body>
+</html>`;
+                        res.setHeader('Content-Type', 'text/html');
+                        res.setHeader('Access-Control-Allow-Origin', '*');
+                        res.end(html);
+                        return;
+                    }
+                    
+                    // If not media, assume it's an HTML file relative to root
+                    entryPath = path.join(this.currentRoot, this.entryFile);
+                } else {
+                    // Fallback: Search for index.html
+                    for (const basePath of this.searchPaths) {
+                        const tryPath = path.join(basePath, 'index.html');
+                        if (fs.existsSync(tryPath)) {
+                            entryPath = tryPath;
+                            break;
+                        }
                     }
                 }
 
-                if (!entryPath) {
+                if (!entryPath || !fs.existsSync(entryPath)) {
                     res.statusCode = 404;
+                    res.setHeader('Access-Control-Allow-Origin', '*');
                     res.end('Entry Not Found');
                     return;
                 }
@@ -106,6 +286,7 @@ export class WallpaperServer {
                 fs.readFile(entryPath, (err, data) => {
                     if (err) {
                         res.statusCode = 404;
+                        res.setHeader('Access-Control-Allow-Origin', '*');
                         res.end('Entry Not Found');
                         return;
                     }
@@ -384,7 +565,22 @@ export class WallpaperServer {
                             html = injection + html;
                         }
                         res.end(html);
-                    } else {
+                    } 
+                    // [New] Patch JS files to fix file:/// issue (copied from demo)
+                    else if (ext === '.js') {
+                        let content = data.toString('utf-8');
+                        if (content.includes('var path = "file:///" + filePath;')) {
+                            console.log(`[Server] Patching file:/// issue in ${path.basename(filePath)}`);
+                            content = content.replace(
+                                'var path = "file:///" + filePath;',
+                                'var path = (filePath.indexOf("http")===0 ? "" : "file:///") + filePath;'
+                            );
+                            res.end(content);
+                        } else {
+                            res.end(data);
+                        }
+                    }
+                    else {
                         res.end(data);
                     }
                 });
@@ -407,6 +603,29 @@ export class WallpaperServer {
             }
         });
 
+        // Initialize WebSocket Server
+        try {
+            console.log(`[Server] Initializing WebSocket Server`);
+            this.wss = new WebSocketServer({ noServer: true });
+            
+            this.server.on('upgrade', (request, socket, head) => {
+                this.wss?.handleUpgrade(request, socket, head, (ws) => {
+                    this.wss?.emit('connection', ws, request);
+                });
+            });
+
+            this.wss.on('connection', (ws) => {
+                console.log('[Server] WebSocket connected');
+                ws.on('message', (message) => {
+                    // Optional: Handle messages from clients
+                });
+            });
+        } catch (e) {
+            console.error('[Server] Failed to initialize WebSocket Server:', e);
+            vscode.window.showErrorMessage('Failed to start WebSocket Server. Real-time settings will not work.');
+        }
+        
+        console.log(`[Server] Setting up server listeners`);
         vscode.window.setStatusBarMessage(`Wallpaper Server: Running at port ${this.PORT}!`, 5000);
         // 启动监听
         this.server.listen(this.PORT, '127.0.0.1', () => {
@@ -427,13 +646,16 @@ export class WallpaperServer {
         });
 
         // 发一个 /ping 请求，确认服务器已启动
+        console.log(`[Server] Sending /ping request to confirm server startup`);
         const req = http.get(`http://127.0.0.1:${this.PORT}/ping`, (res) => {
             // log pong
             vscode.window.setStatusBarMessage(`Wallpaper Server: Success ${res.statusCode}`, 5000);
+            console.log(`[Server] Received /ping response with status: ${res.statusCode}`);
             res.resume();
         });
         req.on('error', (e) => {
             vscode.window.setStatusBarMessage(`Wallpaper Server: Error starting server`, 5000);
+            console.log(`[Server] /ping request error: ${e.message}`);
         });
     }
 
@@ -521,7 +743,7 @@ export class WallpaperServer {
                 // 停止 watchdog，尝试启动服务器
                 if (this.retryInterval) { clearInterval(this.retryInterval); }
                 this.retryInterval = null;
-                this.start(this.currentRoot, this.PORT, true);
+                this.start(this.currentRoot, this.PORT, this.entryFile || undefined, true);
             });
             
             // 设置超时，防止请求挂起
@@ -533,6 +755,14 @@ export class WallpaperServer {
     }
 
     public stop() {
+        if (this.shutdownTimeout) {
+            clearTimeout(this.shutdownTimeout);
+            this.shutdownTimeout = null;
+        }
+        if (this.wss) {
+            this.wss.close();
+            this.wss = null;
+        }
         if (this.retryInterval) {
             clearInterval(this.retryInterval);
             this.retryInterval = null;
@@ -540,6 +770,18 @@ export class WallpaperServer {
         if (this.server) {
             this.server.close();
             this.server = null;
+        }
+        console.log('[Server] Server stopped.');
+    }
+
+    public broadcast(data: any) {
+        if (this.wss) {
+            const msg = JSON.stringify(data);
+            this.wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(msg);
+                }
+            });
         }
     }
 

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}} 'unsafe-inline'; script-src {{cspSource}} 'unsafe-inline'; connect-src http://127.0.0.1:* ws://127.0.0.1:*; img-src data:;">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallpaper Settings</title>
+    <link href="{{styleUri}}" rel="stylesheet" />
+</head>
+<body>
+    <div class="toolbar">
+        <button id="btn-refresh" title="Reload Wallpaper">↻ Refresh</button>
+        <button id="btn-switch" title="Switch Wallpaper">📂 Switch</button>
+        <button id="btn-browser" title="Open in Browser">🌐 Browser</button>
+    </div>
+
+    <div class="section-header">Server Status</div>
+    <div class="control-group" style="padding: 10px; background: #252526; margin-bottom: 10px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+            <span>HTTP: <span id="http-status" style="color: gray;">Unknown</span></span>
+            <span>WS: <span id="ws-status" style="color: gray;">Unknown</span></span>
+        </div>
+        <div style="display: flex; gap: 5px;">
+            <button id="btn-test-http" style="flex: 1;">Test HTTP</button>
+            <button id="btn-test-ws" style="flex: 1;">Test WS</button>
+            <button id="btn-stop-server" style="flex: 1; background: #8b0000;">Stop Server</button>
+        </div>
+    </div>
+    
+    <div class="search-box">
+        <input type="text" id="search-input" placeholder="Search settings..." />
+    </div>
+
+    <div class="section-header">Transparency & CSS</div>
+    <div class="control-group" style="padding: 10px; background: #252526; margin-bottom: 10px;">
+        <div class="control-item" style="margin-top: 10px;">
+            <label>Custom CSS</label>
+            <div style="display: flex; gap: 10px;">
+                <button id="btn-edit-css" style="flex: 1;">Edit in Editor</button>
+                <input type="hidden" id="input-custom-css" value="{{customCss}}">
+            </div>
+        </div>
+        <button id="btn-save-css" style="margin-top: 10px; width: 100%;">Save CSS Settings</button>
+    </div>
+
+    <div class="section-header">Transparency Rules</div>
+    <div class="control-group" style="padding: 10px; background: #252526; margin-bottom: 10px;">
+        <div style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-weight: bold;">Enable Transparency</span>
+            <label class="switch">
+                <input type="checkbox" id="chk-transparency-enabled">
+                <span class="slider round"></span>
+            </label>
+        </div>
+        <div style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <span>Base Color (Optional)</span>
+            <div style="display: flex; gap: 5px;">
+                <input type="text" id="input-base-color" placeholder="Auto (e.g. #1e1e1e)" style="width: 120px; font-family: monospace;" value="{{transparencyBaseColor}}">
+                <button id="btn-save-base-color" style="padding: 2px 8px;">Set</button>
+            </div>
+        </div>
+        <div style="margin-bottom: 10px; font-size: 0.9em; color: #ccc;">
+            Toggle elements to make them transparent. Adjust opacity (0 = Invisible, 1 = Opaque).
+        </div>
+        <div id="transparencyPanel">
+            <!-- Rules will be injected here -->
+        </div>
+        <button id="btn-save-transparency" style="margin-top: 10px; width: 100%;">Apply Transparency Rules</button>
+    </div>
+
+    <div class="section-header">General Simulation</div>
+    <div id="generalPanel" class="control-group">
+        <!-- Audio, Mic, etc. will be injected here -->
+    </div>
+
+    <div class="section-header">Wallpaper Properties</div>
+    <div id="propsPanel">Loading...</div>
+    <script>
+        window.transparencyKeys = {{transparencyKeys}};
+        window.transparencyRules = {{transparencyRules}};
+        window.transparencyEnabled = {{transparencyEnabled}};
+    </script>
+    <script id="settings-script" src="{{scriptUri}}" data-server-root="http://127.0.0.1:{{serverPort}}"></script>
+</body>
+</html>
