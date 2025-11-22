@@ -31,6 +31,18 @@
         <input type="text" id="search-input" placeholder="Search settings..." />
     </div>
 
+    <div class="section-header">Transparency & CSS</div>
+    <div class="control-group" style="padding: 10px; background: #252526; margin-bottom: 10px;">
+        <div class="control-item" style="margin-top: 10px;">
+            <label>Custom CSS</label>
+            <div style="display: flex; gap: 10px;">
+                <button id="btn-edit-css" style="flex: 1;">Edit in Editor</button>
+                <input type="hidden" id="input-custom-css" value="{{customCss}}">
+            </div>
+        </div>
+        <button id="btn-save-css" style="margin-top: 10px; width: 100%;">Save CSS Settings</button>
+    </div>
+
     <div class="section-header">General Simulation</div>
     <div id="generalPanel" class="control-group">
         <!-- Audio, Mic, etc. will be injected here -->

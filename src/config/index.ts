@@ -9,6 +9,7 @@ export interface AppConfig {
     wallpaperId: string;
     resizeDelay: number;
     startupCheckInterval: number;
+    customCss: string;
 }
 
 export function getConfiguration(): AppConfig {
@@ -20,8 +21,9 @@ export function getConfiguration(): AppConfig {
     const wallpaperId = config.get<string>('wallpaperId') || '';
     const resizeDelay = config.get<number>('resizeDelay') || 500;
     const startupCheckInterval = config.get<number>('startupCheckInterval') || 300;
+    const customCss = config.get<string>('customCss') || '';
 
-    return { workshopPath, opacity, serverPort, customJs, wallpaperId, resizeDelay, startupCheckInterval };
+    return { workshopPath, opacity, serverPort, customJs, wallpaperId, resizeDelay, startupCheckInterval, customCss };
 }
 
 export function validateConfig(config: AppConfig): boolean {

@@ -46,7 +46,7 @@ export class SettingsPanel {
 
     private _setWebviewMessageListener(webview: vscode.Webview) {
         webview.onDidReceiveMessage(
-            (message: any) => {
+            async (message: any) => {
                 if (message.command === 'updateProp') {
                     this.server.broadcast({
                         type: 'UPDATE_PROPERTIES',
@@ -68,6 +68,30 @@ export class SettingsPanel {
                 } else if (message.command === 'stopServer') {
                     this.server.stop();
                     vscode.window.showWarningMessage('Wallpaper Server stopped.');
+                } else if (message.command === 'editCustomCss') {
+                    vscode.commands.executeCommand('vscode-wallpaper-engine.editCustomCss');
+                } else if (message.command === 'updateCss') {
+                    const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
+                    
+                    vscode.window.showInformationMessage(`[CSS] Saving settings... Custom: ${message.customCss}`);
+                    
+                    try {
+                        // 1. Update VS Code Config
+                        await config.update('customCss', message.customCss, vscode.ConfigurationTarget.Global);
+                    } catch (e: any) {
+                        vscode.window.showErrorMessage(`[CSS] Config Update Failed: ${e.message}`);
+                        console.error('[CSS] Config Update Failed:', e);
+                    }
+
+                    // 2. Update Server Config (Hot-Swap)
+                    this.server.updateCssConfig({
+                        customCss: message.customCss
+                    });
+                    
+                    console.log('[Panel] Triggering server reload...');
+                    this.server.triggerReload();
+
+                    vscode.window.showInformationMessage('[CSS] Settings saved & Server updated. Hot-swap should trigger in ~2s.');
                 }
             },
             undefined,
@@ -78,6 +102,7 @@ export class SettingsPanel {
     private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri) {
         const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
         const port = config.get<number>('serverPort') || 23333;
+        const customCss = config.get<string>('customCss') || '';
 
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'settings.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'settings.css'));
@@ -85,11 +110,22 @@ export class SettingsPanel {
         
         let htmlContent = fs.readFileSync(htmlPath.fsPath, 'utf-8');
 
+        // Escape special characters for HTML attribute
+        const escapeHtml = (unsafe: string) => {
+            return unsafe
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+         };
+
         htmlContent = htmlContent
             .replace(/{{cspSource}}/g, webview.cspSource)
             .replace(/{{styleUri}}/g, styleUri.toString())
             .replace(/{{scriptUri}}/g, scriptUri.toString())
-            .replace(/{{serverPort}}/g, port.toString());
+            .replace(/{{serverPort}}/g, port.toString())
+            .replace(/{{customCss}}/g, escapeHtml(customCss));
 
         return htmlContent;
     }

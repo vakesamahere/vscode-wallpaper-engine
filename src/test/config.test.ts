@@ -10,7 +10,10 @@ suite('Config Test Suite', () => {
             customJs: '',
             wallpaperId: '',
             resizeDelay: 500,
-            startupCheckInterval: 300
+            startupCheckInterval: 300,
+            transparentOpacity: 0.85,
+            transparentCss: '',
+            customCss: ''
         };
         const result = validateConfig(config);
         assert.strictEqual(result, false);

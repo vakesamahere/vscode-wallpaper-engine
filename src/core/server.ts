@@ -23,6 +23,14 @@ export class WallpaperServer {
     private readonly SHUTDOWN_DELAY = 2 * 60 * 1000; // 2 minutes
     private entryFile: string | null = null;
 
+    private cssConfig = {
+        customCss: ''
+    };
+
+    public updateCssConfig(config: { customCss: string }) {
+        this.cssConfig = config;
+    }
+
     constructor(private context: vscode.ExtensionContext) {
         // 插件启动时，尝试恢复之前的服务器状态
         const lastPath = this.context.globalState.get<string>('currentWallpaperPath');
@@ -159,6 +167,7 @@ export class WallpaperServer {
             if (reqUrl === '/ping') {
                 res.setHeader('Access-Control-Allow-Origin', '*');
                 if (this.reloadFlag) {
+                    console.log('[Server] Sending 205 Reload signal to client');
                     this.reloadFlag = false;
                     res.statusCode = 205; // Reset Content
                     res.end('reload');
@@ -204,6 +213,13 @@ export class WallpaperServer {
                 res.setHeader('Access-Control-Allow-Origin', '*');
                 res.setHeader('Access-Control-Allow-Private-Network', 'true');
                 res.end(BOOTSTRAP_SCRIPT);
+                return;
+            }
+
+            if (reqUrl === '/config') {
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.end(JSON.stringify(this.cssConfig));
                 return;
             }
 

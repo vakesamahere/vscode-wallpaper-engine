@@ -291,60 +291,24 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
             </html>
             \`;
             
-            async function checkHealthLoop() {
-                // Fast polling
-                const start = Date.now();
-                while (true) {
-                    try {
-                        const resp = await fetch(pingUrl, { method: 'GET', mode: 'cors' });
-                        if (resp.ok || resp.status === 205) {
-                            console.log("[WP] Server is ready!");
-                            break;
-                        }
-                    } catch (e) { }
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                    if (Date.now() - start > 30000) { console.error("[WP] Server timeout"); return; }
-                }
-
-                // Server is ready
-                monitorServer();
-                
-                if (typeof initSidebar === 'function') {
-                    console.log("[Sidebar] Server ready, initializing sidebar...");
-                    initSidebar();
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, 100));
+            // Expose control functions to global scope
+            window.reloadWallpaper = () => {
                 el.srcdoc = srcdocContent;
-                
-                el.onload = () => {
-                    el.style.opacity = '${opacity}';
-                    if (loader.parentNode) loader.remove();
-                };
-            }
+            };
+            
+            window.showWallpaper = () => {
+                el.style.opacity = '${opacity}';
+                if (loader.parentNode) loader.remove();
+            };
+            
+            window.hideWallpaper = () => {
+                el.style.opacity = '0';
+                container.appendChild(loader);
+            };
 
-            async function monitorServer() {
-                while(true) {
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    try {
-                        const resp = await fetch(pingUrl, { method: 'GET', mode: 'cors' });
-                        if (resp.status === 205) {
-                            console.log("Wallpaper Engine: Reload signal received.");
-                            el.srcdoc = srcdocContent;
-                        }
-                    } catch(e) {
-                        console.warn("Wallpaper Engine: 服务器断开，重新等待...");
-                        el.style.opacity = '0'; // 隐藏 iframe
-                        // 重新显示 loader? 也可以
-                        container.appendChild(loader);
-                        
-                        el.srcdoc = ''; // Clear content
-                        checkHealthLoop();
-                        break;
-                    }
-                }
-            }
-            checkHealthLoop();
+            el.onload = () => {
+                window.showWallpaper();
+            };
         `;
     }
 
@@ -372,10 +336,83 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
         container.style.left = '0'; 
         container.style.width = '100%'; 
         container.style.height = '100%';
-        container.style.zIndex = '99999';
+        container.style.zIndex = '-1';
         container.style.pointerEvents = 'none';
         container.style.opacity = '1';
         container.style.display = 'flex';
+
+        const SERVER_ROOT = 'http://127.0.0.1:${port}';
+        const PING_URL = SERVER_ROOT + '/ping';
+        const CONFIG_URL = SERVER_ROOT + '/config';
+
+        // Inject Transparency CSS
+        const transparencyStyle = document.createElement('style');
+        transparencyStyle.id = 'vscode-wallpaper-transparency';
+        document.head.appendChild(transparencyStyle);
+
+        async function updateCss() {
+            try {
+                console.log("[WP style inj] Fetching config from " + CONFIG_URL);
+                const res = await fetch(CONFIG_URL);
+                if (res.ok) {
+                    const config = await res.json();
+                    console.log("[WP style inj] Got config:", config);
+                    const css = config.customCss;
+                    
+                    if (transparencyStyle.textContent !== css) {
+                        console.log("[WP style inj] Updating style tag content...");
+                        transparencyStyle.textContent = css;
+                        console.log("[WP style inj] Update complete.");
+                    } else {
+                        console.log("[WP style inj] CSS is identical, skipping update.");
+                    }
+                } else {
+                    console.error("[WP style inj] Fetch failed status:", res.status);
+                }
+            } catch (e) { console.error("[WP style inj] CSS Update Failed", e); }
+        }
+
+        async function mainLoop() {
+            // 1. Wait for server
+            const start = Date.now();
+            while (true) {
+                try {
+                    const resp = await fetch(PING_URL, { method: 'GET', mode: 'cors' });
+                    if (resp.ok || resp.status === 205) {
+                        console.log("[WP] Server is ready!");
+                        break;
+                    }
+                } catch (e) { }
+                await new Promise(resolve => setTimeout(resolve, 200));
+                if (Date.now() - start > 30000) { console.error("[WP] Server timeout"); return; }
+            }
+
+            // 2. Initialize
+            await updateCss();
+            if (typeof initSidebar === 'function') initSidebar();
+            if (window.reloadWallpaper) window.reloadWallpaper();
+            
+            // 3. Monitor Loop
+            while(true) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                try {
+                    const resp = await fetch(PING_URL, { method: 'GET', mode: 'cors' });
+                    if (resp.status === 205) {
+                        console.log("[WP style inj] Reload signal received (205).");
+                        await updateCss();
+                        if (window.reloadWallpaper) window.reloadWallpaper();
+                    }
+                } catch(e) {
+                    console.warn("[WP] Server disconnected...");
+                    if (window.hideWallpaper) window.hideWallpaper();
+                    // Re-enter wait loop
+                    mainLoop(); 
+                    return;
+                }
+            }
+        }
+        
+        mainLoop();
 
         // Sidebar
         if (true) {

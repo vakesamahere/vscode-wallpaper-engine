@@ -291,6 +291,20 @@ function renderUI(json) {
   });
 }
 
+// --- CSS Settings Handler ---
+document.getElementById("btn-edit-css").addEventListener("click", () => {
+  vscode.postMessage({ command: "editCustomCss" });
+});
+
+document.getElementById("btn-save-css").addEventListener("click", () => {
+  const customCss = document.getElementById("input-custom-css").value;
+
+  vscode.postMessage({
+    command: "updateCss",
+    customCss,
+  });
+});
+
 console.log("Settings Webview Loaded");
 renderGeneralSettings(); // Render general settings immediately
 fetch(SERVER_ROOT + "/project.json")

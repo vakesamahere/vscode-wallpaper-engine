@@ -74,6 +74,12 @@
           "default": "",
           "description": "自定义注入的 JavaScript 代码 (将在壁纸加载后执行)",
           "editPresentation": "multilineText"
+        },
+        "vscode-wallpaper-engine.customCss": {
+          "type": "string",
+          "default": "",
+          "description": "自定义注入的 CSS 代码",
+          "editPresentation": "multilineText"
         }
       }
     }

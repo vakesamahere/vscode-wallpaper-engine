@@ -2,12 +2,14 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { getConfiguration, validateConfig } from './config';
 import { scanWallpapers, getWallpaperById } from './core/scanner';
 import { performInjection, restoreWorkbench, isPatched } from './core/injector';
 import { WallpaperServer } from './core/server';
 import { WallpaperType } from './core/types';
 import { WALLPAPER_SERVER_PORT } from './config/constants';
+import { applyTransparencyPatch, removeTransparencyPatch } from './core/config-patcher';
 import { SettingsPanel } from './panels/setting-panel';
 
 // test
@@ -32,7 +34,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     const applyWallpaper = async (forceReload = false, silent = false) => {
         const config = getConfiguration();
-        if (!config.wallpaperId || !config.workshopPath) { return; }
+        if (!config.wallpaperId || !config.workshopPath) {
+            if (!silent) {
+                vscode.window.showWarningMessage('Please select a wallpaper and configure workshop path first to apply settings.');
+            }
+            return; 
+        }
 
         const item = getWallpaperById(config.workshopPath, config.wallpaperId);
         if (item) {
@@ -42,9 +49,15 @@ export function activate(context: vscode.ExtensionContext) {
             
             if (server) {
                 await server.start(dirPath, config.serverPort, fileName);
+                server.updateCssConfig({
+                    customCss: config.customCss
+                });
             }
 
             await performInjection(filePath, WallpaperType.Web, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, false, SHOW_DEBUG_SIDEBAR);
+            
+            // Apply transparency patch
+            await applyTransparencyPatch();
             
             if (silent) { return; }
 
@@ -69,7 +82,10 @@ export function activate(context: vscode.ExtensionContext) {
             e.affectsConfiguration('vscode-wallpaper-engine.serverPort') ||
             e.affectsConfiguration('vscode-wallpaper-engine.customJs') ||
             e.affectsConfiguration('vscode-wallpaper-engine.resizeDelay') ||
-            e.affectsConfiguration('vscode-wallpaper-engine.startupCheckInterval');
+            e.affectsConfiguration('vscode-wallpaper-engine.startupCheckInterval') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.transparentOpacity') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.transparentCss') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.customCss');
 
         if (affectsId && !affectsOthers) {
              const config = getConfiguration();
@@ -142,6 +158,9 @@ export function activate(context: vscode.ExtensionContext) {
                     
                     if (server) {
                         await server.start(dirPath, config.serverPort, fileName);
+                        server.updateCssConfig({
+                            customCss: config.customCss
+                        });
                     }
                     
                     // Pass autoRestart=false because we handle reload via ping
@@ -169,6 +188,7 @@ export function activate(context: vscode.ExtensionContext) {
         );
         if (confirm === '卸载') {
             await restoreWorkbench();
+            await removeTransparencyPatch();
             server?.stop();
         }
     });
@@ -180,6 +200,41 @@ export function activate(context: vscode.ExtensionContext) {
             SettingsPanel.createOrShow(context.extensionUri, server);
         } else {
             vscode.window.showErrorMessage('Wallpaper Server is not running.');
+        }
+    }));
+
+    // Edit Custom CSS Command
+    const cssStoragePath = path.join(context.globalStorageUri.fsPath, 'custom.css');
+    const editCustomCssCmd = vscode.commands.registerCommand('vscode-wallpaper-engine.editCustomCss', async () => {
+        const config = getConfiguration();
+        const cssContent = config.customCss || '/* Enter your custom CSS here */';
+        
+        if (!fs.existsSync(context.globalStorageUri.fsPath)) {
+            fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
+        }
+        
+        fs.writeFileSync(cssStoragePath, cssContent, 'utf-8');
+        
+        const doc = await vscode.workspace.openTextDocument(cssStoragePath);
+        await vscode.window.showTextDocument(doc);
+    });
+    context.subscriptions.push(editCustomCssCmd);
+
+    // Listen for CSS file save
+    context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(async (doc) => {
+        if (path.normalize(doc.fileName) === path.normalize(cssStoragePath)) {
+            const content = doc.getText();
+            const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
+            await config.update('customCss', content, vscode.ConfigurationTarget.Global);
+            
+            if (server) {
+                const currentConfig = getConfiguration();
+                server.updateCssConfig({
+                    customCss: content
+                });
+                server.triggerReload();
+                vscode.window.setStatusBarMessage('Wallpaper CSS Updated', 2000);
+            }
         }
     }));
 }
