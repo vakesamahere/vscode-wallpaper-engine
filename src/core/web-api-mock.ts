@@ -138,6 +138,16 @@ export const MOCK_API_SCRIPT = `
         else if (type === 'AUDIO_TICK' && cbs.audio) {
             cbs.audio(data);
         }
+        else if (type === 'UPDATE_GENERAL') {
+            console.log('[WE-Mock] PostMessage General Update:', data);
+            if (data.audioSource !== undefined) {
+                window.parent.postMessage({ type: 'CHANGE_AUDIO_SOURCE', source: data.audioSource }, '*');
+                audioSourceType = 'external';
+            }
+            if (data.audioVolume !== undefined) {
+                audioVolume = data.audioVolume;
+            }
+        }
         else if (type === 'INIT_GENERAL' && cbs.general) {
             if (cbs.general.applyGeneralProperties) {
                 cbs.general.applyGeneralProperties({ fps: 60, isActive: true });
@@ -213,7 +223,7 @@ export const MOCK_API_SCRIPT = `
     let analyser;
     let dataArray;
     let micStream;
-    let audioSourceType = 'simulate';
+    let audioSourceType = 'off';
     let audioVolume = 50;
 
     async function initMic() {
@@ -265,6 +275,11 @@ export const MOCK_API_SCRIPT = `
     }
 
     function audioLoop() {
+        if (audioSourceType === 'external') {
+            requestAnimationFrame(audioLoop);
+            return;
+        }
+
         let audioData = new Array(64).fill(0);
         
         if (audioSourceType === 'simulate') {
@@ -333,10 +348,8 @@ export const MOCK_API_SCRIPT = `
                     } else if (msg.type === 'UPDATE_GENERAL') {
                         console.log('[WE-Mock] WS General Update:', msg.data);
                         if (msg.data.audioSource !== undefined) {
-                            audioSourceType = msg.data.audioSource;
-                            if (audioSourceType === 'mic') initMic();
-                            else if (audioSourceType === 'system') initSystemAudio();
-                            else stopAudio();
+                            window.parent.postMessage({ type: 'CHANGE_AUDIO_SOURCE', source: msg.data.audioSource }, '*');
+                            audioSourceType = 'external';
                         }
                         if (msg.data.audioVolume !== undefined) {
                             audioVolume = msg.data.audioVolume;

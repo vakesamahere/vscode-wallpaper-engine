@@ -60,12 +60,14 @@ export class SettingsPanel {
                         data: { [message.key]: message.value }
                     });
                 } else if (message.command === 'refresh') {
-                    this.server.triggerReload();
-                    vscode.window.showInformationMessage('Refreshing wallpaper...');
+                    vscode.commands.executeCommand('vscode-wallpaper-engine.refreshWallpaper');
                 } else if (message.command === 'switch') {
                     vscode.commands.executeCommand('vscode-wallpaper-engine.setWallpaper');
                 } else if (message.command === 'openBrowser') {
                     vscode.commands.executeCommand('vscode-wallpaper-engine.openInBrowser');
+                } else if (message.command === 'stopServer') {
+                    this.server.stop();
+                    vscode.window.showWarningMessage('Wallpaper Server stopped.');
                 }
             },
             undefined,

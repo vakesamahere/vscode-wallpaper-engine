@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { getConfiguration, validateConfig } from './config';
 import { scanWallpapers, getWallpaperById } from './core/scanner';
-import { performInjection, restoreWorkbench } from './core/injector';
+import { performInjection, restoreWorkbench, isPatched } from './core/injector';
 import { WallpaperServer } from './core/server';
 import { WallpaperType } from './core/types';
 import { WALLPAPER_SERVER_PORT } from './config/constants';
@@ -30,37 +30,67 @@ export function activate(context: vscode.ExtensionContext) {
     const initialConfig = getConfiguration();
     server.start(context.globalState.get<string>('currentWallpaperPath') || '', initialConfig.serverPort);
 
-    // Watch for config changes
-    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async e => {
-        if (isSettingWallpaper) { return; }
-        
-        if (e.affectsConfiguration('vscode-wallpaper-engine.wallpaperId') ||
-            e.affectsConfiguration('vscode-wallpaper-engine.backgroundOpacity') ||
-            e.affectsConfiguration('vscode-wallpaper-engine.serverPort') ||
-            e.affectsConfiguration('vscode-wallpaper-engine.customJs') ||
-            e.affectsConfiguration('vscode-wallpaper-engine.resizeDelay') ||
-            e.affectsConfiguration('vscode-wallpaper-engine.startupCheckInterval')) {
+    const applyWallpaper = async (forceReload = false, silent = false) => {
+        const config = getConfiguration();
+        if (!config.wallpaperId || !config.workshopPath) { return; }
+
+        const item = getWallpaperById(config.workshopPath, config.wallpaperId);
+        if (item) {
+            const { path: filePath, type } = item.getMediaPath();
+            const dirPath = path.dirname(filePath);
+            const fileName = path.basename(filePath);
             
-            const config = getConfiguration();
-            if (!config.wallpaperId || !config.workshopPath) { return; }
+            if (server) {
+                await server.start(dirPath, config.serverPort, fileName);
+            }
 
-            const item = getWallpaperById(config.workshopPath, config.wallpaperId);
-            if (item) {
-                const { path: filePath, type } = item.getMediaPath();
-                
-                if (type === WallpaperType.Web && server) {
-                    const dirPath = path.dirname(filePath);
-                    await server.start(dirPath, config.serverPort);
-                }
+            await performInjection(filePath, WallpaperType.Web, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, false, SHOW_DEBUG_SIDEBAR);
+            
+            if (silent) { return; }
 
-                // Don't auto restart, prompt instead
-                await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, false, SHOW_DEBUG_SIDEBAR);
-                
+            if (forceReload) {
+                vscode.commands.executeCommand('workbench.action.reloadWindow');
+            } else {
                 const action = await vscode.window.showInformationMessage('Wallpaper Engine settings changed. Restart to apply?', 'Restart');
                 if (action === 'Restart') {
                     vscode.commands.executeCommand('workbench.action.reloadWindow');
                 }
             }
+        }
+    };
+
+    // Watch for config changes
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async e => {
+        if (isSettingWallpaper) { return; }
+        
+        const affectsId = e.affectsConfiguration('vscode-wallpaper-engine.wallpaperId');
+        const affectsOthers = 
+            e.affectsConfiguration('vscode-wallpaper-engine.backgroundOpacity') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.serverPort') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.customJs') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.resizeDelay') ||
+            e.affectsConfiguration('vscode-wallpaper-engine.startupCheckInterval');
+
+        if (affectsId && !affectsOthers) {
+             const config = getConfiguration();
+             if (config.wallpaperId && config.workshopPath) {
+                const item = getWallpaperById(config.workshopPath, config.wallpaperId);
+                if (item && server) {
+                    await applyWallpaper(false, true);
+                    return;
+                }
+             }
+        }
+
+        if (affectsId || affectsOthers) {
+            await applyWallpaper();
+        }
+    }));
+
+    context.subscriptions.push(vscode.commands.registerCommand('vscode-wallpaper-engine.refreshWallpaper', async () => {
+        if (server) {
+            server.triggerReload();
+            vscode.window.showInformationMessage('Refreshing wallpaper...');
         }
     }));
 
@@ -107,19 +137,15 @@ export function activate(context: vscode.ExtensionContext) {
                     await vscode.workspace.getConfiguration('vscode-wallpaper-engine').update('wallpaperId', selected.id, vscode.ConfigurationTarget.Global);
 
                     const { path: filePath, type } = selected.getMediaPath();
+                    const dirPath = path.dirname(filePath);
+                    const fileName = path.basename(filePath);
                     
-                    // 如果是 Web 类型，我们需要通知 Server 切换目录
-                    if (type === WallpaperType.Web) {
-                        // 获取壁纸所在的文件夹目录
-                        const dirPath = path.dirname(filePath);
-                        if (server) {
-                            await server.start(dirPath, config.serverPort);
-                            server.triggerReload(); // Trigger reload via ping
-                        }
+                    if (server) {
+                        await server.start(dirPath, config.serverPort, fileName);
                     }
                     
                     // Pass autoRestart=false because we handle reload via ping
-                    await performInjection(filePath, type, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, false, SHOW_DEBUG_SIDEBAR);
+                    await performInjection(filePath, WallpaperType.Web, config.opacity, config.serverPort, config.customJs, config.resizeDelay, config.startupCheckInterval, false, SHOW_DEBUG_SIDEBAR);
                 } finally {
                     setTimeout(() => { isSettingWallpaper = false; }, 2000);
                 }

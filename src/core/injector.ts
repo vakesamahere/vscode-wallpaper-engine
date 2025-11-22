@@ -87,6 +87,17 @@ function getWorkbenchPath(file: 'html' | 'js'): string | null {
     return null;
 }
 
+export function isPatched(): boolean {
+    const jsPath = getWorkbenchPath('js');
+    if (!jsPath) { return false; }
+    try {
+        const js = fs.readFileSync(jsPath, 'utf-8');
+        return js.includes('/* [VSCode-Wallpaper-Injection-Start] */');
+    } catch {
+        return false;
+    }
+}
+
 /**
  * [还原/卸载功能]
  * 1. JS: 清除注入代码
@@ -241,7 +252,7 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
             el = document.createElement('iframe');
             el.className = 'vscode-wallpaper-iframe';
             el.frameBorder = '0';
-            el.allow = "autoplay; fullscreen";
+            el.allow = "autoplay; fullscreen; microphone; display-capture";
             el.style.opacity = '0'; // 初始隐藏
             el.style.transition = 'opacity 0.5s ease-in-out';
             
@@ -254,66 +265,62 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
             </head>
             <body>
                 <script>
-                    fetch('${entryUrl}')
-                        .then(resp => {
-                            if(!resp.ok) throw new Error('Server not ready');
-                            return resp.text();
-                        })
-                        .then(html => {
-                            document.open();
-                            document.write(html);
-                            document.close();
-                        })
-                        .catch(err => {
-                            document.body.innerHTML = '<h1 style=color:red>Connection Failed</h1>';
-                            console.error('Wallpaper Load Error:', err);
-                        });
+                    const entryUrl = '${entryUrl}';
+                    async function loadWallpaper() {
+                        let attempts = 0;
+                        while(attempts < 20) {
+                            try {
+                                const resp = await fetch(entryUrl);
+                                if(!resp.ok) throw new Error('Server not ready');
+                                const html = await resp.text();
+                                document.open();
+                                document.write(html);
+                                document.close();
+                                return;
+                            } catch(err) {
+                                console.warn('Wallpaper Load Retry:', err);
+                                attempts++;
+                                await new Promise(r => setTimeout(r, 500));
+                            }
+                        }
+                        document.body.innerHTML = '<h1 style=color:red>Connection Failed</h1>';
+                    }
+                    loadWallpaper();
                 </script>
             </body>
             </html>
             \`;
             
             async function checkHealthLoop() {
-                await new Promise(resolve => setTimeout(resolve, ${startupCheckInterval}));
-                let isHealthy = false;
-                try {
-                    const resp = await fetch(pingUrl, { method: 'GET', mode: 'cors' });
-                    if (resp.ok || resp.status === 205) {
-                        isHealthy = true;
-                        console.log("[WP server]: isHealthy = true;");
-                    }
-                } catch (e) {
-                    console.warn("Wallpaper Engine: 等待服务器开启...", e);
-                }
-                if (!isHealthy) {
-                    checkHealthLoop();
-                } else {
-                    
-                    // 超时兜底 (3秒)
-                    setTimeout(() => {
-                        if (el.style.opacity === '0') {
-                            el.style.opacity = '${opacity}';
-                            if (loader.parentNode) loader.remove();
+                // Fast polling
+                const start = Date.now();
+                while (true) {
+                    try {
+                        const resp = await fetch(pingUrl, { method: 'GET', mode: 'cors' });
+                        if (resp.ok || resp.status === 205) {
+                            console.log("[WP] Server is ready!");
+                            break;
                         }
-                    }, 3000);
-
-                    monitorServer();
-                    
-                    // [New] Start Sidebar after server is ready
-                    if (typeof initSidebar === 'function') {
-                        console.log("[Sidebar] Server ready, initializing sidebar...");
-                        initSidebar();
-                    }
-                    // wait for a short moment to ensure iframe is ready
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    el.srcdoc = srcdocContent;
-                    
-                    // 加载完成后显示
-                    el.onload = () => {
-                        el.style.opacity = '${opacity}';
-                        if (loader.parentNode) loader.remove();
-                    };
+                    } catch (e) { }
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    if (Date.now() - start > 30000) { console.error("[WP] Server timeout"); return; }
                 }
+
+                // Server is ready
+                monitorServer();
+                
+                if (typeof initSidebar === 'function') {
+                    console.log("[Sidebar] Server ready, initializing sidebar...");
+                    initSidebar();
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 100));
+                el.srcdoc = srcdocContent;
+                
+                el.onload = () => {
+                    el.style.opacity = '${opacity}';
+                    if (loader.parentNode) loader.remove();
+                };
             }
 
             async function monitorServer() {
@@ -640,17 +647,29 @@ const SIDEBAR_JS_LOGIC = `
     let analyser;
     let dataArray;
     let micStream;
-    let audioSourceType = 'simulate';
+    let audioSourceType = 'off';
 
     const audioSelect = document.getElementById('audioSource');
-    if (audioSelect) {
-        audioSelect.onchange = (e) => {
-            audioSourceType = e.target.value;
-            if (audioSourceType === 'mic') initMic();
-            else if (audioSourceType === 'system') initSystemAudio();
-            else stopAudio();
-        };
+    
+    function setAudioSource(val) {
+        audioSourceType = val;
+        if (audioSelect) audioSelect.value = val;
+        if (audioSourceType === 'mic') initMic();
+        else if (audioSourceType === 'system') initSystemAudio();
+        else stopAudio();
     }
+
+    if (audioSelect) {
+        audioSelect.onchange = (e) => setAudioSource(e.target.value);
+    }
+
+    // Listen for requests from Iframe (forwarded from Settings Panel)
+    window.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'CHANGE_AUDIO_SOURCE') {
+            console.log("[Sidebar] Received audio source change request:", e.data.source);
+            setAudioSource(e.data.source);
+        }
+    });
 
     async function initMic() {
         stopAudio();

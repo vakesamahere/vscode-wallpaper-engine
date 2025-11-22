@@ -22,6 +22,71 @@ document.getElementById("btn-browser").addEventListener("click", () => {
   vscode.postMessage({ command: "openBrowser" });
 });
 
+// --- Server Status Handlers ---
+const httpStatusEl = document.getElementById("http-status");
+const wsStatusEl = document.getElementById("ws-status");
+
+async function checkHTTP() {
+  httpStatusEl.innerText = "Checking...";
+  httpStatusEl.style.color = "orange";
+  try {
+    const start = Date.now();
+    const res = await fetch(SERVER_ROOT + "/ping");
+    const ms = Date.now() - start;
+    if (res.ok || res.status === 205) {
+      httpStatusEl.innerText = `OK (${ms}ms)`;
+      httpStatusEl.style.color = "#4caf50";
+    } else {
+      httpStatusEl.innerText = `Error ${res.status}`;
+      httpStatusEl.style.color = "red";
+    }
+  } catch (e) {
+    httpStatusEl.innerText = "Failed";
+    httpStatusEl.style.color = "red";
+  }
+}
+
+function checkWS() {
+  wsStatusEl.innerText = "Connecting...";
+  wsStatusEl.style.color = "orange";
+  try {
+    const wsUrl = SERVER_ROOT.replace("http", "ws");
+    const ws = new WebSocket(wsUrl);
+    const start = Date.now();
+
+    ws.onopen = () => {
+      const ms = Date.now() - start;
+      wsStatusEl.innerText = `Connected (${ms}ms)`;
+      wsStatusEl.style.color = "#4caf50";
+      ws.close();
+    };
+
+    ws.onerror = () => {
+      wsStatusEl.innerText = "Error";
+      wsStatusEl.style.color = "red";
+    };
+  } catch (e) {
+    wsStatusEl.innerText = "Exception";
+    wsStatusEl.style.color = "red";
+  }
+}
+
+document.getElementById("btn-test-http").addEventListener("click", checkHTTP);
+document.getElementById("btn-test-ws").addEventListener("click", checkWS);
+document.getElementById("btn-stop-server").addEventListener("click", () => {
+  vscode.postMessage({ command: "stopServer" });
+  httpStatusEl.innerText = "Stopped";
+  httpStatusEl.style.color = "red";
+  wsStatusEl.innerText = "Stopped";
+  wsStatusEl.style.color = "red";
+});
+
+// Initial check
+setTimeout(() => {
+  checkHTTP();
+  checkWS();
+}, 1000);
+
 // --- Search Handler ---
 document.getElementById("search-input").addEventListener("input", (e) => {
   const term = e.target.value.toLowerCase();
@@ -97,7 +162,7 @@ function renderGeneralSettings() {
     o.innerText = opt.label;
     audioSelect.appendChild(o);
   });
-  audioSelect.value = "simulate"; // Default
+  audioSelect.value = "off"; // Default
   audioSelect.onchange = (e) => updateGeneral("audioSource", e.target.value);
   audioDiv.appendChild(audioSelect);
   panel.appendChild(audioDiv);

@@ -21,6 +21,7 @@ export class WallpaperServer {
 
     private shutdownTimeout: NodeJS.Timeout | null = null;
     private readonly SHUTDOWN_DELAY = 2 * 60 * 1000; // 2 minutes
+    private entryFile: string | null = null;
 
     constructor(private context: vscode.ExtensionContext) {
         // 插件启动时，尝试恢复之前的服务器状态
@@ -87,13 +88,23 @@ export class WallpaperServer {
     }
 
     // [修改] 变成 async，确保状态保存完毕
-    public async start(rootPath: string, port: number, silent = false) {
+    public async start(rootPath: string, port: number, entryFile?: string, silent = false) {
         this.PORT = port;
         vscode.window.setStatusBarMessage(`Preparing Wallpaper Server...`, 5000);
         
         // 1. Check local instance
-        if (this.server && this.currentRoot === rootPath) {
-            return;
+        if (this.server) {
+            if (this.currentRoot === rootPath && this.entryFile === (entryFile || null)) {
+                return;
+            } else {
+                console.log(`[Server] Hot swapping root to ${rootPath}`);
+                this.currentRoot = rootPath;
+                this.entryFile = entryFile || null;
+                await this.context.globalState.update('currentWallpaperPath', rootPath);
+                this.updateSearchPaths(rootPath);
+                this.triggerReload();
+                return;
+            }
         }
 
         // 2. Check external instance (Multi-window support)
@@ -199,15 +210,57 @@ export class WallpaperServer {
             // [New] API to get entry HTML (for srcdoc injection)
             if (reqUrl === '/api/get-entry') {
                 let entryPath = '';
-                for (const basePath of this.searchPaths) {
-                    const tryPath = path.join(basePath, 'index.html');
-                    if (fs.existsSync(tryPath)) {
-                        entryPath = tryPath;
-                        break;
+                
+                if (this.entryFile) {
+                    // If entryFile is provided (Video/Image/Explicit Web)
+                    // Check if it's a media file
+                    const ext = path.extname(this.entryFile).toLowerCase();
+                    if (['.mp4', '.webm', '.mkv', '.avi', '.mov'].includes(ext)) {
+                        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <style>body, html { margin: 0; padding: 0; overflow: hidden; background: black; width: 100%; height: 100%; } video { width: 100%; height: 100%; object-fit: cover; }</style>
+</head>
+<body>
+    <video src="${this.entryFile}" autoplay loop muted playsinline></video>
+</body>
+</html>`;
+                        res.setHeader('Content-Type', 'text/html');
+                        res.setHeader('Access-Control-Allow-Origin', '*');
+                        res.end(html);
+                        return;
+                    } else if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(ext)) {
+                        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <style>body, html { margin: 0; padding: 0; overflow: hidden; background: black; width: 100%; height: 100%; } img { width: 100%; height: 100%; object-fit: cover; }</style>
+</head>
+<body>
+    <img src="${this.entryFile}">
+</body>
+</html>`;
+                        res.setHeader('Content-Type', 'text/html');
+                        res.setHeader('Access-Control-Allow-Origin', '*');
+                        res.end(html);
+                        return;
+                    }
+                    
+                    // If not media, assume it's an HTML file relative to root
+                    entryPath = path.join(this.currentRoot, this.entryFile);
+                } else {
+                    // Fallback: Search for index.html
+                    for (const basePath of this.searchPaths) {
+                        const tryPath = path.join(basePath, 'index.html');
+                        if (fs.existsSync(tryPath)) {
+                            entryPath = tryPath;
+                            break;
+                        }
                     }
                 }
 
-                if (!entryPath) {
+                if (!entryPath || !fs.existsSync(entryPath)) {
                     res.statusCode = 404;
                     res.end('Entry Not Found');
                     return;
@@ -672,7 +725,7 @@ export class WallpaperServer {
                 // 停止 watchdog，尝试启动服务器
                 if (this.retryInterval) { clearInterval(this.retryInterval); }
                 this.retryInterval = null;
-                this.start(this.currentRoot, this.PORT, true);
+                this.start(this.currentRoot, this.PORT, this.entryFile || undefined, true);
             });
             
             // 设置超时，防止请求挂起
