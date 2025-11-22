@@ -43,6 +43,31 @@
         <button id="btn-save-css" style="margin-top: 10px; width: 100%;">Save CSS Settings</button>
     </div>
 
+    <div class="section-header">Transparency Rules</div>
+    <div class="control-group" style="padding: 10px; background: #252526; margin-bottom: 10px;">
+        <div style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-weight: bold;">Enable Transparency</span>
+            <label class="switch">
+                <input type="checkbox" id="chk-transparency-enabled">
+                <span class="slider round"></span>
+            </label>
+        </div>
+        <div style="margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <span>Base Color (Optional)</span>
+            <div style="display: flex; gap: 5px;">
+                <input type="text" id="input-base-color" placeholder="Auto (e.g. #1e1e1e)" style="width: 120px; font-family: monospace;" value="{{transparencyBaseColor}}">
+                <button id="btn-save-base-color" style="padding: 2px 8px;">Set</button>
+            </div>
+        </div>
+        <div style="margin-bottom: 10px; font-size: 0.9em; color: #ccc;">
+            Toggle elements to make them transparent. Adjust opacity (0 = Invisible, 1 = Opaque).
+        </div>
+        <div id="transparencyPanel">
+            <!-- Rules will be injected here -->
+        </div>
+        <button id="btn-save-transparency" style="margin-top: 10px; width: 100%;">Apply Transparency Rules</button>
+    </div>
+
     <div class="section-header">General Simulation</div>
     <div id="generalPanel" class="control-group">
         <!-- Audio, Mic, etc. will be injected here -->
@@ -50,6 +75,11 @@
 
     <div class="section-header">Wallpaper Properties</div>
     <div id="propsPanel">Loading...</div>
+    <script>
+        window.transparencyKeys = {{transparencyKeys}};
+        window.transparencyRules = {{transparencyRules}};
+        window.transparencyEnabled = {{transparencyEnabled}};
+    </script>
     <script id="settings-script" src="{{scriptUri}}" data-server-root="http://127.0.0.1:{{serverPort}}"></script>
 </body>
 </html>

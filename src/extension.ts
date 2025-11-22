@@ -103,6 +103,14 @@ export function activate(context: vscode.ExtensionContext) {
         }
     }));
 
+    // Watch for theme changes to re-apply transparency patch with correct base color
+    context.subscriptions.push(vscode.window.onDidChangeActiveColorTheme(async () => {
+        // Wait a bit for the theme to fully apply
+        setTimeout(async () => {
+            await applyTransparencyPatch();
+        }, 1000);
+    }));
+
     context.subscriptions.push(vscode.commands.registerCommand('vscode-wallpaper-engine.refreshWallpaper', async () => {
         if (server) {
             server.triggerReload();

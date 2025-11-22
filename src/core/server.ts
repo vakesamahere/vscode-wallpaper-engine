@@ -278,6 +278,7 @@ export class WallpaperServer {
 
                 if (!entryPath || !fs.existsSync(entryPath)) {
                     res.statusCode = 404;
+                    res.setHeader('Access-Control-Allow-Origin', '*');
                     res.end('Entry Not Found');
                     return;
                 }
@@ -285,6 +286,7 @@ export class WallpaperServer {
                 fs.readFile(entryPath, (err, data) => {
                     if (err) {
                         res.statusCode = 404;
+                        res.setHeader('Access-Control-Allow-Origin', '*');
                         res.end('Entry Not Found');
                         return;
                     }

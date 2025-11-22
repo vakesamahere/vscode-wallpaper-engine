@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { WallpaperServer } from '../core/server';
+import { TRANSPARENT_COLOR_KEYS, applyTransparencyPatch } from '../core/config-patcher';
 
 export class SettingsPanel {
     public static currentPanel: SettingsPanel | undefined;
@@ -92,6 +93,33 @@ export class SettingsPanel {
                     this.server.triggerReload();
 
                     vscode.window.showInformationMessage('[CSS] Settings saved & Server updated. Hot-swap should trigger in ~2s.');
+                } else if (message.command === 'updateTransparencyRules') {
+                    const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
+                    try {
+                        await config.update('transparencyRules', message.rules, vscode.ConfigurationTarget.Global);
+                        await applyTransparencyPatch();
+                        vscode.window.showInformationMessage('Transparency rules updated.');
+                    } catch (e: any) {
+                        vscode.window.showErrorMessage(`Failed to update transparency rules: ${e.message}`);
+                    }
+                } else if (message.command === 'toggleTransparency') {
+                    const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
+                    try {
+                        await config.update('transparencyEnabled', message.enabled, vscode.ConfigurationTarget.Global);
+                        await applyTransparencyPatch();
+                        vscode.window.showInformationMessage(`Transparency ${message.enabled ? 'Enabled' : 'Disabled'}.`);
+                    } catch (e: any) {
+                        vscode.window.showErrorMessage(`Failed to toggle transparency: ${e.message}`);
+                    }
+                } else if (message.command === 'updateTransparencyBaseColor') {
+                    const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
+                    try {
+                        await config.update('transparencyBaseColor', message.color, vscode.ConfigurationTarget.Global);
+                        await applyTransparencyPatch();
+                        vscode.window.showInformationMessage('Transparency base color updated.');
+                    } catch (e: any) {
+                        vscode.window.showErrorMessage(`Failed to update base color: ${e.message}`);
+                    }
                 }
             },
             undefined,
@@ -103,6 +131,9 @@ export class SettingsPanel {
         const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
         const port = config.get<number>('serverPort') || 23333;
         const customCss = config.get<string>('customCss') || '';
+        const transparencyRules = config.get<any>('transparencyRules') || {};
+        const transparencyEnabled = config.get<boolean>('transparencyEnabled') ?? true;
+        const transparencyBaseColor = config.get<string>('transparencyBaseColor') || '';
 
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'settings.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'settings.css'));
@@ -125,7 +156,11 @@ export class SettingsPanel {
             .replace(/{{styleUri}}/g, styleUri.toString())
             .replace(/{{scriptUri}}/g, scriptUri.toString())
             .replace(/{{serverPort}}/g, port.toString())
-            .replace(/{{customCss}}/g, escapeHtml(customCss));
+            .replace(/{{customCss}}/g, escapeHtml(customCss))
+            .replace(/{{transparencyKeys}}/g, JSON.stringify(TRANSPARENT_COLOR_KEYS))
+            .replace(/{{transparencyRules}}/g, JSON.stringify(transparencyRules))
+            .replace(/{{transparencyEnabled}}/g, JSON.stringify(transparencyEnabled))
+            .replace(/{{transparencyBaseColor}}/g, escapeHtml(transparencyBaseColor));
 
         return htmlContent;
     }

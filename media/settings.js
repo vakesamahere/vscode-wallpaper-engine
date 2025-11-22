@@ -305,6 +305,164 @@ document.getElementById("btn-save-css").addEventListener("click", () => {
   });
 });
 
+// --- Transparency Toggle Handler ---
+const chkTransparencyEnabled = document.getElementById(
+  "chk-transparency-enabled"
+);
+const transparencyPanel = document.getElementById("transparencyPanel");
+const btnSaveTransparency = document.getElementById("btn-save-transparency");
+
+// Initialize state
+chkTransparencyEnabled.checked = window.transparencyEnabled !== false; // Default true
+updateTransparencyUIState();
+
+chkTransparencyEnabled.addEventListener("change", () => {
+  const enabled = chkTransparencyEnabled.checked;
+  updateTransparencyUIState();
+
+  vscode.postMessage({
+    command: "toggleTransparency",
+    enabled: enabled,
+  });
+});
+
+function updateTransparencyUIState() {
+  const enabled = chkTransparencyEnabled.checked;
+  if (enabled) {
+    transparencyPanel.style.opacity = "1";
+    transparencyPanel.style.pointerEvents = "auto";
+    btnSaveTransparency.disabled = false;
+    btnSaveTransparency.style.opacity = "1";
+  } else {
+    transparencyPanel.style.opacity = "0.5";
+    transparencyPanel.style.pointerEvents = "none";
+    btnSaveTransparency.disabled = true;
+    btnSaveTransparency.style.opacity = "0.5";
+  }
+}
+
+// --- Base Color Handler ---
+document.getElementById("btn-save-base-color").addEventListener("click", () => {
+  const color = document.getElementById("input-base-color").value.trim();
+  // Simple validation
+  if (color && !/^#[0-9A-Fa-f]{6}$/.test(color)) {
+    // Show error in UI? For now just let backend handle or ignore
+    // But let's be nice
+    alert(
+      "Invalid color format. Use Hex (e.g. #1e1e1e) or leave empty for Auto."
+    );
+    return;
+  }
+
+  vscode.postMessage({
+    command: "updateTransparencyBaseColor",
+    color: color,
+  });
+});
+
+// --- Transparency Rules Handler ---
+function renderTransparencyRules() {
+  const panel = document.getElementById("transparencyPanel");
+  const keys = window.transparencyKeys || [];
+  const rules = window.transparencyRules || {};
+
+  panel.innerHTML = "";
+
+  keys.forEach((key) => {
+    const div = document.createElement("div");
+    div.className = "control-item";
+    div.style.display = "flex";
+    div.style.alignItems = "center";
+    div.style.justifyContent = "space-between";
+    div.style.marginBottom = "5px";
+    div.style.padding = "2px 0";
+    div.style.borderBottom = "1px solid #333";
+
+    // Checkbox (Enable/Disable)
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = rules[key] !== undefined;
+    checkbox.style.marginRight = "10px";
+
+    // Label
+    const label = document.createElement("span");
+    label.innerText = key;
+    label.style.flex = "1";
+    label.style.fontSize = "0.9em";
+    label.title = key; // Tooltip
+
+    // Slider Container
+    const sliderContainer = document.createElement("div");
+    sliderContainer.style.display = "flex";
+    sliderContainer.style.alignItems = "center";
+    sliderContainer.style.gap = "5px";
+    sliderContainer.style.visibility = checkbox.checked ? "visible" : "hidden";
+
+    // Slider (Opacity)
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "0";
+    slider.max = "1";
+    slider.step = "0.01";
+    slider.value = rules[key] !== undefined ? rules[key] : 0; // Default 0 (Transparent)
+    slider.style.width = "100px";
+
+    // Value Display
+    const valDisplay = document.createElement("span");
+    valDisplay.innerText = parseFloat(slider.value).toFixed(2);
+    valDisplay.style.width = "35px";
+    valDisplay.style.textAlign = "right";
+    valDisplay.style.fontSize = "0.8em";
+    valDisplay.style.fontFamily = "monospace";
+
+    // Events
+    checkbox.onchange = () => {
+      sliderContainer.style.visibility = checkbox.checked
+        ? "visible"
+        : "hidden";
+    };
+
+    slider.oninput = () => {
+      valDisplay.innerText = parseFloat(slider.value).toFixed(2);
+    };
+
+    sliderContainer.appendChild(slider);
+    sliderContainer.appendChild(valDisplay);
+
+    div.appendChild(checkbox);
+    div.appendChild(label);
+    div.appendChild(sliderContainer);
+
+    // Store references for saving
+    div.dataset.key = key;
+    div.dataset.type = "transparency-rule";
+
+    panel.appendChild(div);
+  });
+}
+
+document
+  .getElementById("btn-save-transparency")
+  .addEventListener("click", () => {
+    const items = document.querySelectorAll("#transparencyPanel .control-item");
+    const newRules = {};
+
+    items.forEach((item) => {
+      const key = item.dataset.key;
+      const checkbox = item.querySelector("input[type='checkbox']");
+      const slider = item.querySelector("input[type='range']");
+
+      if (checkbox.checked) {
+        newRules[key] = parseFloat(slider.value);
+      }
+    });
+
+    vscode.postMessage({
+      command: "updateTransparencyRules",
+      rules: newRules,
+    });
+  });
+
 console.log("Settings Webview Loaded");
 renderGeneralSettings(); // Render general settings immediately
 fetch(SERVER_ROOT + "/project.json")
@@ -314,3 +472,6 @@ fetch(SERVER_ROOT + "/project.json")
     (e) =>
       (document.getElementById("propsPanel").innerText = "Error: " + e.message)
   );
+
+// Initial Render
+renderTransparencyRules();
