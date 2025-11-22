@@ -2,6 +2,11 @@
   "name": "vscode-wallpaper-engine",
   "displayName": "vscode-wallpaper-engine",
   "description": "",
+  "publisher": "vakesamahere",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vakesamahere/vscode-wallpaper-engine.git"
+  },
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.106.1"
@@ -136,8 +141,16 @@
     "eslint": "^9.39.1",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.46.3"
+    "typescript-eslint": "^8.46.3",
+    "vsce": "^2.15.0"
   },
+  "files": [
+    "dist",
+    "media",
+    "package.json",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "dependencies": {
     "sudo-prompt": "^9.2.1",
     "ws": "^8.18.3"
