@@ -272,7 +272,71 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
                             try {
                                 const resp = await fetch(entryUrl);
                                 if(!resp.ok) throw new Error('Server not ready');
-                                const html = await resp.text();
+                                let html = await resp.text();
+                                
+                                // [Fix] Inject <base> tag to ensure relative paths work
+                                if (!html.includes('<base')) {
+                                    const baseTag = "<base href='http://127.0.0.1:${port}/' />";
+                                    if (html.includes('<head>')) {
+                                        html = html.replace('<head>', '<head>' + baseTag);
+                                    } else if (html.includes('<html>')) {
+                                        html = html.replace('<html>', '<html><head>' + baseTag + '</head>');
+                                    } else {
+                                        html = '<head>' + baseTag + '</head>' + html;
+                                    }
+                                }
+
+                                // [Fix] Static HTML file:// replacement
+                                html = html.replace(/(src|href)\\\\s*=\\\\s*(["'])file:\\\\/\\\\/\\\\//gi, '$1=$2/');
+                                html = html.replace(/url\\\\(\\\\s*(["']?)file:\\\\/\\\\/\\\\//gi, 'url($1/');
+                                
+                                const interceptor =  
+                                    "<script>" +
+                                    "(function(){" +
+                                    "    function r(u){" +
+                                    "        if(!u||typeof u!=='string')return u;" +
+                                    "        if(u.startsWith('file:///'))return u.replace('file:///','/');" +
+                                    "        return u;" +
+                                    "    }" +
+                                    "    const f=window.fetch;" +
+                                    "    window.fetch=function(i,n){" +
+                                    "        if(typeof i==='string')i=r(i);" +
+                                    "        return f(i,n);" +
+                                    "    };" +
+                                    "    const o=XMLHttpRequest.prototype.open;" +
+                                    "    XMLHttpRequest.prototype.open=function(m,u,...a){" +
+                                    "        u=r(u);" +
+                                    "        return o.call(this,m,u,...a);" +
+                                    "    };" +
+                                    "    function s(p){" +
+                                    "        const d=Object.getOwnPropertyDescriptor(p,'src');" +
+                                    "        if(d&&d.set){" +
+                                    "            const os=d.set;" +
+                                    "            Object.defineProperty(p,'src',{" +
+                                    "                set:function(v){" +
+                                    "                    if(this.tagName==='IMG'||this.tagName==='VIDEO'||this.tagName==='AUDIO'){" +
+                                    "                        this.crossOrigin='anonymous';" +
+                                    "                    }" +
+                                    "                    os.call(this,r(v));" +
+                                    "                }," +
+                                    "                get:d.get," +
+                                    "                enumerable:d.enumerable," +
+                                    "                configurable:d.configurable" +
+                                    "            });" +
+                                    "        }" +
+                                    "    }" +
+                                    "    if(window.HTMLImageElement)s(window.HTMLImageElement.prototype);" +
+                                    "    if(window.HTMLAudioElement)s(window.HTMLAudioElement.prototype);" +
+                                    "    if(window.HTMLVideoElement)s(window.HTMLVideoElement.prototype);" +
+                                    "    if(window.HTMLScriptElement)s(window.HTMLScriptElement.prototype);" +
+                                    "})();" +
+                                    "<\\\\/script>";
+
+                                if (html.includes('<head>')) {
+                                    html = html.replace('<head>', '<head>' + interceptor);
+                                } else {
+                                    html = interceptor + html;
+                                }
                                 document.open();
                                 document.write(html);
                                 document.close();
@@ -473,6 +537,18 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
                     if (closeBtn) closeBtn.onclick = () => {toggleSidebar(false); console.log("Close clicked");}
                     if (openBtn) openBtn.onclick = () => {toggleSidebar(true); console.log("Open clicked"); }
 
+                    // [New] Open Folder Logic
+                    const openFolderBtn = document.getElementById('openFolderBtn');
+                    if (openFolderBtn) {
+                        openFolderBtn.onclick = () => {
+                            fetch(SERVER_ROOT + '/open-folder')
+                                .then(r => {
+                                    if (!r.ok) console.error('Failed to open folder');
+                                })
+                                .catch(e => console.error('Error opening folder:', e));
+                        };
+                    }
+
                     function updateProp(key, val) {
                         const payload = {};
                         payload[key] = { value: val };
@@ -575,6 +651,9 @@ const SIDEBAR_HTML = `
             <option value="system">System Audio (Screen Share)</option>
             <option value="off">Off (Silence)</option>
         </select>
+    </div>
+    <div style="padding: 10px; border-bottom: 1px solid #444; background: #2d2d2d;">
+        <button id="openFolderBtn" style="width:100%; background:#0e639c; color:white; border:none; padding:5px; cursor:pointer; pointer-events: auto;">Open Wallpaper Folder</button>
     </div>
     <div style="padding: 15px; overflow-y: auto; flex: 1; color: #ccc;" id="propsPanel">
         <div style="color:#666; text-align:center; margin-top:20px;">Loading config...</div>

@@ -28,6 +28,18 @@ export class WallpaperServer {
         customCss: ''
     };
 
+    public getCurrentInfo() {
+        return {
+            root: this.currentRoot,
+            entry: this.entryFile,
+            port: this.PORT
+        };
+    }
+
+    public getCurrentRoot(): string {
+        return this.currentRoot;
+    }
+
     public updateCssConfig(config: { customCss: string }) {
         this.cssConfig = config;
     }
@@ -135,7 +147,7 @@ export class WallpaperServer {
                 // Wait for port to be released
                 console.log('[server launch] Waiting for port release...');
                 let attempts = 0;
-                while (attempts < 10) {
+                while (attempts < 20) {
                     await new Promise(resolve => setTimeout(resolve, 500));
                     const s = await this.checkServerStatus(port);
                     if (!s) {
@@ -143,7 +155,20 @@ export class WallpaperServer {
                         break;
                     }
                     console.log(`[server launch] Port still busy (attempt ${attempts + 1})...`);
+                    // Try to shutdown again periodically
+                    if (attempts % 5 === 0) {
+                        await this.shutdownRemoteServer(port);
+                    }
                     attempts++;
+                }
+                
+                // Final check
+                const finalStatus = await this.checkServerStatus(port);
+                if (finalStatus && finalStatus.running) {
+                    const msg = `Port ${port} is still occupied by another process. Please close other VS Code windows or kill the process manually.`;
+                    console.error(`[server launch] ${msg}`);
+                    vscode.window.showErrorMessage(msg);
+                    return; // ABORT
                 }
             }
         }
@@ -234,6 +259,20 @@ export class WallpaperServer {
                 res.setHeader('Access-Control-Allow-Origin', '*');
                 res.setHeader('Access-Control-Allow-Private-Network', 'true');
                 res.end(BOOTSTRAP_SCRIPT);
+                return;
+            }
+
+            // [New] Open Folder
+            if (reqUrl === '/open-folder') {
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                if (this.currentRoot) {
+                    // Use vscode.env.openExternal to open the folder
+                    vscode.env.openExternal(vscode.Uri.file(this.currentRoot));
+                    res.end('ok');
+                } else {
+                    res.statusCode = 404;
+                    res.end('No wallpaper loaded');
+                }
                 return;
             }
 

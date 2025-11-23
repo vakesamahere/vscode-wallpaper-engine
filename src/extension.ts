@@ -186,7 +186,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const openInBrowserCmd = vscode.commands.registerCommand('vscode-wallpaper-engine.openInBrowser', async () => {
         const config = getConfiguration();
-        const url = `http://127.0.0.1:${config.serverPort}/index.html`;
+        const url = `http://127.0.0.1:${config.serverPort}/api/get-entry`;
         await vscode.env.openExternal(vscode.Uri.parse(url));
     });
     context.subscriptions.push(openInBrowserCmd);

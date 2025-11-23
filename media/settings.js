@@ -21,6 +21,9 @@ document.getElementById("btn-switch").addEventListener("click", () => {
 document.getElementById("btn-browser").addEventListener("click", () => {
   vscode.postMessage({ command: "openBrowser" });
 });
+document.getElementById("btn-folder").addEventListener("click", () => {
+  vscode.postMessage({ command: "openFolder" });
+});
 
 // --- Server Status Handlers ---
 const httpStatusEl = document.getElementById("http-status");

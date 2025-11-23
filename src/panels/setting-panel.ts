@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import { WallpaperServer } from '../core/server';
 import { TRANSPARENT_COLOR_KEYS, applyTransparencyPatch } from '../core/config-patcher';
 
@@ -66,6 +67,13 @@ export class SettingsPanel {
                     vscode.commands.executeCommand('vscode-wallpaper-engine.setWallpaper');
                 } else if (message.command === 'openBrowser') {
                     vscode.commands.executeCommand('vscode-wallpaper-engine.openInBrowser');
+                } else if (message.command === 'openFolder') {
+                    const root = this.server.getCurrentRoot();
+                    if (root) {
+                        vscode.env.openExternal(vscode.Uri.file(root));
+                    } else {
+                        vscode.window.showErrorMessage('No wallpaper loaded.');
+                    }
                 } else if (message.command === 'stopServer') {
                     this.server.stop();
                     vscode.window.showWarningMessage('Wallpaper Server stopped.');
@@ -135,6 +143,12 @@ export class SettingsPanel {
         const transparencyEnabled = config.get<boolean>('transparencyEnabled') ?? true;
         const transparencyBaseColor = config.get<string>('transparencyBaseColor') || '';
 
+        const info = this.server.getCurrentInfo();
+        const infoPath = info.root || 'None';
+        const infoEntry = info.entry || 'None';
+        const infoName = infoPath !== 'None' ? path.basename(infoPath) : 'None';
+        const infoType = infoEntry !== 'None' ? path.extname(infoEntry).toUpperCase().replace('.', '') : 'None';
+
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'settings.js'));
         const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'settings.css'));
         const htmlPath = vscode.Uri.joinPath(extensionUri, 'media', 'settings.html');
@@ -152,6 +166,10 @@ export class SettingsPanel {
          };
 
         htmlContent = htmlContent
+            .replace(/{{infoName}}/g, escapeHtml(infoName))
+            .replace(/{{infoType}}/g, escapeHtml(infoType))
+            .replace(/{{infoEntry}}/g, escapeHtml(infoEntry))
+            .replace(/{{infoPath}}/g, escapeHtml(infoPath))
             .replace(/{{cspSource}}/g, webview.cspSource)
             .replace(/{{styleUri}}/g, styleUri.toString())
             .replace(/{{scriptUri}}/g, scriptUri.toString())

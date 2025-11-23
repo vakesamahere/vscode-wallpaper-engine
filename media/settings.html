@@ -12,6 +12,7 @@
         <button id="btn-refresh" title="Reload Wallpaper">↻ Refresh</button>
         <button id="btn-switch" title="Switch Wallpaper">📂 Switch</button>
         <button id="btn-browser" title="Open in Browser">🌐 Browser</button>
+        <button id="btn-folder" title="Open Wallpaper Folder">📁 Folder</button>
     </div>
 
     <div class="section-header">Server Status</div>
@@ -25,6 +26,14 @@
             <button id="btn-test-ws" style="flex: 1;">Test WS</button>
             <button id="btn-stop-server" style="flex: 1; background: #8b0000;">Stop Server</button>
         </div>
+    </div>
+
+    <div class="section-header">Wallpaper Info</div>
+    <div class="control-group" style="padding: 10px; background: #252526; margin-bottom: 10px; font-size: 12px; color: #ccc;">
+        <div style="margin-bottom: 5px;"><strong>Name:</strong> <span id="info-name">{{infoName}}</span></div>
+        <div style="margin-bottom: 5px;"><strong>Type:</strong> <span id="info-type">{{infoType}}</span></div>
+        <div style="margin-bottom: 5px;"><strong>Entry:</strong> <span id="info-entry">{{infoEntry}}</span></div>
+        <div style="margin-bottom: 5px; word-break: break-all;"><strong>Path:</strong> <span id="info-path">{{infoPath}}</span></div>
     </div>
     
     <div class="search-box">

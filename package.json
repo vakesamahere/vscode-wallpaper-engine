@@ -7,7 +7,7 @@
     "type": "git",
     "url": "https://github.com/vakesamahere/vscode-wallpaper-engine.git"
   },
-  "version": "0.0.2",
+  "version": "0.0.3",
   "engines": {
     "vscode": "^1.106.1"
   },
@@ -129,7 +129,7 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vscode-test",
-    
+
     "output": "npm run vsce-package && node ./scripts/move-vsix.js",
     "vsce-package": "npx vsce package"
   },
