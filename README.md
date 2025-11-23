@@ -113,3 +113,7 @@ VS Code 内置的 Electron 环境默认携带的 `ffmpeg.dll` 是精简版，不
 ---
 
 **Enjoy your coding with live wallpapers!** 🎨
+
+## ☕️ Buy Me A Coffee (支持作者)
+
+<img src="assets/wechat_pay.jpg" width="200" alt="wechat_pay">
