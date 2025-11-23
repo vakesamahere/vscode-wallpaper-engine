@@ -30,7 +30,12 @@ export function activate(context: vscode.ExtensionContext) {
     
     server = new WallpaperServer(context);
     const initialConfig = getConfiguration();
-    server.start(context.globalState.get<string>('currentWallpaperPath') || '', initialConfig.serverPort);
+    const savedPath = context.globalState.get<string>('currentWallpaperPath');
+    const savedEntry = context.globalState.get<string>('currentWallpaperEntry');
+    const savedLocation = context.globalState.get<string>('currentWallpaperLocation');
+    if (savedPath) {
+        server.start(savedPath, initialConfig.serverPort, savedEntry, savedLocation);
+    }
 
     const applyWallpaper = async (forceReload = false, silent = false) => {
         const config = getConfiguration();
@@ -44,11 +49,10 @@ export function activate(context: vscode.ExtensionContext) {
         const item = getWallpaperById(config.workshopPath, config.wallpaperId);
         if (item) {
             const { path: filePath, type } = item.getMediaPath();
-            const dirPath = path.dirname(filePath);
             const fileName = path.basename(filePath);
             
             if (server) {
-                await server.start(dirPath, config.serverPort, fileName);
+                await server.start(item.dirPath, config.serverPort, fileName, item.location);
                 server.updateCssConfig({
                     customCss: config.customCss
                 });
@@ -161,11 +165,10 @@ export function activate(context: vscode.ExtensionContext) {
                     await vscode.workspace.getConfiguration('vscode-wallpaper-engine').update('wallpaperId', selected.id, vscode.ConfigurationTarget.Global);
 
                     const { path: filePath, type } = selected.getMediaPath();
-                    const dirPath = path.dirname(filePath);
                     const fileName = path.basename(filePath);
                     
                     if (server) {
-                        await server.start(dirPath, config.serverPort, fileName);
+                        await server.start(selected.dirPath, config.serverPort, fileName, selected.location);
                         server.updateCssConfig({
                             customCss: config.customCss
                         });

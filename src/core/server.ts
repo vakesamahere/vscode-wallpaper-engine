@@ -22,6 +22,7 @@ export class WallpaperServer {
     private shutdownTimeout: NodeJS.Timeout | null = null;
     private readonly SHUTDOWN_DELAY = 2 * 60 * 1000; // 2 minutes
     private entryFile: string | null = null;
+    private currentLocation: string | undefined;
 
     private cssConfig = {
         customCss: ''
@@ -59,7 +60,7 @@ export class WallpaperServer {
 
     private checkServerStatus(port: number): Promise<{ running: boolean, rootPath: string } | null> {
         return new Promise((resolve) => {
-            const req = http.get(`http://127.0.0.1:${port}/status`, (res) => {
+            const req = http.get(`http://127.0.0.1:${port}/status`, { agent: false }, (res) => {
                 if (res.statusCode !== 200) {
                     resolve(null);
                     return;
@@ -84,7 +85,7 @@ export class WallpaperServer {
 
     private shutdownRemoteServer(port: number): Promise<void> {
         return new Promise((resolve) => {
-            const req = http.get(`http://127.0.0.1:${port}/shutdown`, (res) => {
+            const req = http.get(`http://127.0.0.1:${port}/shutdown`, { agent: false }, (res) => {
                 resolve();
             });
             req.on('error', () => resolve());
@@ -96,7 +97,8 @@ export class WallpaperServer {
     }
 
     // [修改] 变成 async，确保状态保存完毕
-    public async start(rootPath: string, port: number, entryFile?: string, silent = false) {
+    public async start(rootPath: string, port: number, entryFile?: string, location?: string, silent = false) {
+        console.log(`[server launch] start called. root: ${rootPath}, port: ${port}, entry: ${entryFile}, loc: ${location}`);
         this.PORT = port;
         vscode.window.setStatusBarMessage(`Preparing Wallpaper Server...`, 5000);
         
@@ -108,8 +110,11 @@ export class WallpaperServer {
                 console.log(`[Server] Hot swapping root to ${rootPath}`);
                 this.currentRoot = rootPath;
                 this.entryFile = entryFile || null;
+                this.currentLocation = location;
                 await this.context.globalState.update('currentWallpaperPath', rootPath);
-                this.updateSearchPaths(rootPath);
+                await this.context.globalState.update('currentWallpaperEntry', this.entryFile);
+                await this.context.globalState.update('currentWallpaperLocation', location);
+                this.updateSearchPaths(rootPath, location);
                 this.triggerReload();
                 return;
             }
@@ -128,7 +133,18 @@ export class WallpaperServer {
                 console.log(`[Server] Existing server running different path (${status.rootPath}). Restarting...`);
                 await this.shutdownRemoteServer(port);
                 // Wait for port to be released
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                console.log('[server launch] Waiting for port release...');
+                let attempts = 0;
+                while (attempts < 10) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    const s = await this.checkServerStatus(port);
+                    if (!s) {
+                        console.log('[server launch] Port released.');
+                        break;
+                    }
+                    console.log(`[server launch] Port still busy (attempt ${attempts + 1})...`);
+                    attempts++;
+                }
             }
         }
 
@@ -136,16 +152,21 @@ export class WallpaperServer {
         this.stop();
 
         this.currentRoot = rootPath;
+        this.entryFile = entryFile || null;
+        this.currentLocation = location;
         
         // [关键] 等待状态保存完成！防止重启后丢失路径
         await this.context.globalState.update('currentWallpaperPath', rootPath);
+        await this.context.globalState.update('currentWallpaperEntry', this.entryFile);
+        await this.context.globalState.update('currentWallpaperLocation', location);
 
-        this.updateSearchPaths(rootPath); // [New] Update search paths on server start
+        this.updateSearchPaths(rootPath, location); // [New] Update search paths on server start
         
         this.resetShutdownTimer(); // Start the timer
 
-        console.log(`[Server] Starting server at port ${this.PORT} for root: ${this.currentRoot}`);
+        console.log(`[server launch] Creating HTTP server...`);
         this.server = http.createServer((req, res) => {
+            console.log(`[server launch] Request received: ${req.method} ${req.url}`);
             this.resetShutdownTimer(); // Reset timer on every request
 
             const safeRoot = path.normalize(this.currentRoot);
@@ -225,6 +246,7 @@ export class WallpaperServer {
 
             // [New] API to get entry HTML (for srcdoc injection)
             if (reqUrl === '/api/get-entry') {
+                console.log(`[Server] /api/get-entry called. entryFile: ${this.entryFile}, root: ${this.currentRoot}`);
                 let entryPath = '';
                 
                 if (this.entryFile) {
@@ -263,8 +285,34 @@ export class WallpaperServer {
                         return;
                     }
                     
-                    // If not media, assume it's an HTML file relative to root
-                    entryPath = path.join(this.currentRoot, this.entryFile);
+                    // If not media, check if it is HTML
+                    if (ext === '.html' || ext === '.htm') {
+                        // Try to find the file in search paths
+                        for (const basePath of this.searchPaths) {
+                            const tryPath = path.join(basePath, this.entryFile);
+                            if (fs.existsSync(tryPath)) {
+                                entryPath = tryPath;
+                                break;
+                            }
+                        }
+                        if (!entryPath) {
+                            entryPath = path.join(this.currentRoot, this.entryFile);
+                        }
+                    } else {
+                        // If not HTML (e.g. scene.pkg, project.json), try to find index.html in search paths
+                        for (const basePath of this.searchPaths) {
+                            const tryIndex = path.join(basePath, 'index.html');
+                            if (fs.existsSync(tryIndex)) {
+                                entryPath = tryIndex;
+                                break;
+                            }
+                        }
+                        
+                        if (!entryPath) {
+                            // Fallback to the file itself (might be text/json)
+                            entryPath = path.join(this.currentRoot, this.entryFile);
+                        }
+                    }
                 } else {
                     // Fallback: Search for index.html
                     for (const basePath of this.searchPaths) {
@@ -276,7 +324,10 @@ export class WallpaperServer {
                     }
                 }
 
+                console.log(`[Server] Resolved entryPath: ${entryPath}`);
+
                 if (!entryPath || !fs.existsSync(entryPath)) {
+                    console.log(`[Server] Entry path not found or empty.`);
                     res.statusCode = 404;
                     res.setHeader('Access-Control-Allow-Origin', '*');
                     res.end('Entry Not Found');
@@ -331,6 +382,7 @@ export class WallpaperServer {
                 if (targetPath) {
                     targetPath = targetPath.replace(/^[\\/]+/, ""); // Remove leading slashes
                     
+
                     // Search in all paths
                     let allFiles = new Set<string>();
                     for (const basePath of this.searchPaths) {
@@ -625,11 +677,11 @@ export class WallpaperServer {
             vscode.window.showErrorMessage('Failed to start WebSocket Server. Real-time settings will not work.');
         }
         
-        console.log(`[Server] Setting up server listeners`);
+        console.log(`[server launch] Setting up server listeners`);
         vscode.window.setStatusBarMessage(`Wallpaper Server: Running at port ${this.PORT}!`, 5000);
         // 启动监听
         this.server.listen(this.PORT, '127.0.0.1', () => {
-            console.log(`Wallpaper Server started on port ${this.PORT}`);
+            console.log(`[server launch] Wallpaper Server started on port ${this.PORT}`);
             if (!silent) {
                 // 开发阶段提示一下，确保你知道它起来了
                 vscode.window.setStatusBarMessage(`Wallpaper Server: Running at port ${this.PORT}`, 5000);
@@ -637,6 +689,7 @@ export class WallpaperServer {
         });
 
         this.server.on('error', (err: any) => {
+            console.log(`[server launch] Server error: ${err.message}`);
             if (err.code === 'EADDRINUSE') {
                 console.log(`Port ${this.PORT} is busy. Switching to standby mode.`);
                 this.startWatchdog();
@@ -647,7 +700,7 @@ export class WallpaperServer {
 
         // 发一个 /ping 请求，确认服务器已启动
         console.log(`[Server] Sending /ping request to confirm server startup`);
-        const req = http.get(`http://127.0.0.1:${this.PORT}/ping`, (res) => {
+        const req = http.get(`http://127.0.0.1:${this.PORT}/ping`, { agent: false }, (res) => {
             // log pong
             vscode.window.setStatusBarMessage(`Wallpaper Server: Success ${res.statusCode}`, 5000);
             console.log(`[Server] Received /ping response with status: ${res.statusCode}`);
@@ -659,9 +712,12 @@ export class WallpaperServer {
         });
     }
 
-    private updateSearchPaths(rootPath: string) {
-        console.log(`[add file] Updating search paths for root: ${rootPath}`);
+    private updateSearchPaths(rootPath: string, location?: string) {
+        console.log(`[add file] Updating search paths for root: ${rootPath}, location: ${location}`);
         this.searchPaths = [rootPath];
+        if (location && location !== rootPath) {
+            this.searchPaths.push(location);
+        }
         
         // Always set workshop base path to parent directory, consistent with demo
         const basePath = path.dirname(rootPath);
@@ -732,7 +788,7 @@ export class WallpaperServer {
         
         this.retryInterval = setInterval(() => {
             // 尝试连接端口，看是否有人在监听
-            const req = http.get(`http://127.0.0.1:${this.PORT}/ping`, (res) => {
+            const req = http.get(`http://127.0.0.1:${this.PORT}/ping`, { agent: false }, (res) => {
                 // 连接成功，说明主服务器还活着，什么都不做
                 res.resume();
             });
@@ -743,7 +799,7 @@ export class WallpaperServer {
                 // 停止 watchdog，尝试启动服务器
                 if (this.retryInterval) { clearInterval(this.retryInterval); }
                 this.retryInterval = null;
-                this.start(this.currentRoot, this.PORT, this.entryFile || undefined, true);
+                this.start(this.currentRoot, this.PORT, this.entryFile || undefined, this.currentLocation, true);
             });
             
             // 设置超时，防止请求挂起
@@ -768,6 +824,9 @@ export class WallpaperServer {
             this.retryInterval = null;
         }
         if (this.server) {
+            if (typeof this.server.closeAllConnections === 'function') {
+                this.server.closeAllConnections();
+            }
             this.server.close();
             this.server = null;
         }

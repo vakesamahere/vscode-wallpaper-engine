@@ -11,23 +11,25 @@ export class WallpaperItem implements vscode.QuickPickItem {
     dirPath: string;
     type: WallpaperType;
     id: string;
+    location: string;
     
-    constructor(title: string, id: string, file: string, dirPath: string, type: WallpaperType) {
+    constructor(title: string, id: string, file: string, dirPath: string, type: WallpaperType, location?: string) {
         this.label = `$(device-camera-video) ${title}`;
         this.description = `ID: ${id} [${type}]`;
         this.detail = file;
         this.dirPath = dirPath;
         this.type = type;
         this.id = id;
+        this.location = location || dirPath;
     }
 
     getMediaPath(): { path: string, type: WallpaperType } {
         let mainFile = this.detail || 'index.html'; // Fallback
-        let finalPath = path.join(this.dirPath, mainFile);
+        let finalPath = path.join(this.location, mainFile); // Use location instead of dirPath
 
         // 针对 Image 类型的特殊处理：如果主文件不是常见图片格式，尝试使用 preview.jpg
         if (this.type === WallpaperType.Image && !mainFile.match(/\.(jpg|jpeg|png)$/i)) {
-            const preview = path.join(this.dirPath, 'preview.jpg');
+            const preview = path.join(this.location, 'preview.jpg');
             if (fs.existsSync(preview)) {
                 finalPath = preview;
             }
@@ -36,7 +38,7 @@ export class WallpaperItem implements vscode.QuickPickItem {
     }
 }
 
-function resolveWallpaperInfo(workshopPath: string, id: string, visited = new Set<string>()): { type: WallpaperType, file: string } | null {
+function resolveWallpaperInfo(workshopPath: string, id: string, visited = new Set<string>()): { type: WallpaperType, file: string, location: string } | null {
     if (visited.has(id)) return null;
     visited.add(id);
 
@@ -56,14 +58,14 @@ function resolveWallpaperInfo(workshopPath: string, id: string, visited = new Se
         let file = json.file || null;
 
         if (type) {
-            return { type, file: file || 'index.html' };
+            return { type, file: file || 'index.html', location: dirPath };
         }
 
         // Try dependency
         if (json.dependency) {
             const depInfo = resolveWallpaperInfo(workshopPath, json.dependency, visited);
             if (depInfo) {
-                return { type: depInfo.type, file: file || depInfo.file };
+                return { type: depInfo.type, file: file || depInfo.file, location: depInfo.location };
             }
         }
     } catch (e) {}
@@ -88,7 +90,8 @@ export function scanWallpapers(workshopPath: string): WallpaperItem[] {
                     dir, 
                     info.file, 
                     path.join(workshopPath, dir),
-                    info.type
+                    info.type,
+                    info.location
                 ));
             } catch (e) {}
         }
@@ -108,7 +111,8 @@ export function getWallpaperById(workshopPath: string, id: string): WallpaperIte
                 id, 
                 info.file, 
                 dirPath,
-                info.type
+                info.type,
+                info.location
             );
         } catch (e) {}
     }

@@ -268,7 +268,7 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
                     const entryUrl = '${entryUrl}';
                     async function loadWallpaper() {
                         let attempts = 0;
-                        while(attempts < 20) {
+                        while(attempts < 200) {
                             try {
                                 const resp = await fetch(entryUrl);
                                 if(!resp.ok) throw new Error('Server not ready');
