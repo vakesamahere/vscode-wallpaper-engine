@@ -104,8 +104,11 @@ export class SettingsPanel {
                 } else if (message.command === 'updateTransparencyRules') {
                     const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
                     try {
-                        await config.update('transparencyRules', message.rules, vscode.ConfigurationTarget.Global);
-                        await applyTransparencyPatch();
+                        const inspect = config.inspect('transparencyRules');
+                        const target = (inspect && inspect.workspaceValue !== undefined) ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+                        
+                        await config.update('transparencyRules', message.rules, target);
+                        await applyTransparencyPatch(target);
                         vscode.window.showInformationMessage('Transparency rules updated.');
                     } catch (e: any) {
                         vscode.window.showErrorMessage(`Failed to update transparency rules: ${e.message}`);
@@ -113,8 +116,11 @@ export class SettingsPanel {
                 } else if (message.command === 'toggleTransparency') {
                     const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
                     try {
-                        await config.update('transparencyEnabled', message.enabled, vscode.ConfigurationTarget.Global);
-                        await applyTransparencyPatch();
+                        const inspect = config.inspect('transparencyEnabled');
+                        const target = (inspect && inspect.workspaceValue !== undefined) ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+
+                        await config.update('transparencyEnabled', message.enabled, target);
+                        await applyTransparencyPatch(target);
                         vscode.window.showInformationMessage(`Transparency ${message.enabled ? 'Enabled' : 'Disabled'}.`);
                     } catch (e: any) {
                         vscode.window.showErrorMessage(`Failed to toggle transparency: ${e.message}`);
@@ -122,8 +128,11 @@ export class SettingsPanel {
                 } else if (message.command === 'updateTransparencyBaseColor') {
                     const config = vscode.workspace.getConfiguration('vscode-wallpaper-engine');
                     try {
-                        await config.update('transparencyBaseColor', message.color, vscode.ConfigurationTarget.Global);
-                        await applyTransparencyPatch();
+                        const inspect = config.inspect('transparencyBaseColor');
+                        const target = (inspect && inspect.workspaceValue !== undefined) ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+
+                        await config.update('transparencyBaseColor', message.color, target);
+                        await applyTransparencyPatch(target);
                         vscode.window.showInformationMessage('Transparency base color updated.');
                     } catch (e: any) {
                         vscode.window.showErrorMessage(`Failed to update base color: ${e.message}`);
