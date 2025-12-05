@@ -5,21 +5,52 @@ import * as path from 'path';
 // 【透明化目标列表】所有可能遮挡壁纸的 UI 元素 Key
 export const TRANSPARENT_COLOR_KEYS = [
     // 核心区域
-    "editor.background", // 代码编辑区背景
-    "editorGroup.emptyBackground", // 未打开文件时的背景
-    "editorGroupHeader.tabsBackground", // 标签页背景
-    "terminal.background", // 终端背景
+    "editor.background",
+    "editorGroup.emptyBackground",
+    "editorGroupHeader.tabsBackground",
+    "terminal.background",
 
     // 侧边栏/面板
-    "sideBar.background", // 侧边栏背景
-    "panel.background", // 底部面板背景
-    "activityBar.background", // 活动栏 (最左侧图标栏) 背景
+    "sideBar.background",
+    "sideBarSectionHeader.background",
+    "panel.background",
+    "activityBar.background",
     
-    // 其他 UI 元素
+    // 标题栏
+    "titleBar.activeBackground",
+    "titleBar.inactiveBackground",
+
+    // 标签页
     "tab.inactiveBackground",
     "tab.activeBackground",
     "tab.unfocusedActiveBackground",
-    "statusBar.background" // 状态栏背景 (需注意可读性)
+    "tab.hoverBackground",
+    "tab.unfocusedHoverBackground",
+
+    // 状态栏
+    "statusBar.background",
+    "statusBar.debuggingBackground",
+    "statusBar.noFolderBackground",
+    "statusBarItem.hoverBackground",
+    "statusBarItem.remoteBackground",
+    "statusBarItem.prominentBackground",
+
+    // 弹窗/菜单/输入框
+    "menu.background",
+    "quickInput.background",
+    "editorWidget.background",
+    "debugToolBar.background",
+    "notifications.background",
+    "notificationCenterHeader.background",
+    "peekViewEditor.background",
+    "peekViewResult.background",
+    
+    // 控件背景
+    "dropdown.background",
+    "dropdown.listBackground",
+    "input.background",
+    "settings.dropdownBackground",
+    "welcomePage.tileBackground"
 ];
 
 /**
@@ -42,6 +73,10 @@ export async function applyTransparencyPatch(target: vscode.ConfigurationTarget 
 
     // 2. 准备新的配置对象 (复制一份)
     const newCustomizations = { ...existingCustomizations };
+
+    // logging 
+    console.log("[CUSTOM COLOR] Existing Customizations:", existingCustomizations);
+    console.log("[CUSTOM COLOR] New Customizations:", newCustomizations);
 
     // 获取当前主题类型 (Light/Dark)
     const isLightTheme = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Light;

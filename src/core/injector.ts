@@ -409,6 +409,11 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
         const PING_URL = SERVER_ROOT + '/ping';
         const CONFIG_URL = SERVER_ROOT + '/config';
 
+        // [Fix] Force transparent background for workbench container
+        const baseStyle = document.createElement('style');
+        baseStyle.textContent = 'div[role="application"] { background: transparent !important; }';
+        document.head.appendChild(baseStyle);
+
         // Inject Transparency CSS
         const transparencyStyle = document.createElement('style');
         transparencyStyle.id = 'vscode-wallpaper-transparency';

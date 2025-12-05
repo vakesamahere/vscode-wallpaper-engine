@@ -35,7 +35,8 @@
     - 输入并执行 `Set Wallpaper: 设置壁纸`。
     - 从列表中选择一个壁纸。
 4.  **重启 VS Code**:
-    - 插件会提示重启以应用核心注入补丁。重启后即可看到动态壁纸。
+    - 插件会提示重启以应用核心注入补丁。
+    - **注意**: 初次设置壁纸或更新注入后，必须重启 VS Code 或执行 `Developer: Reload Window` (Ctrl+Shift+P -> Reload Window) 才能生效。
 
 ## ⚙️ 配置详解
 

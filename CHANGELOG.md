@@ -4,6 +4,17 @@ All notable changes to the "vscode-wallpaper-engine" extension will be documente
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.4] - 2025-12-06
+
+### Added
+
+- **Transparency**: Expanded transparency support for more UI elements including Title Bar, Notifications, Menus, Quick Input, and Status Bar items.
+
+### Fixed
+
+- **Settings Panel**: Fixed an issue where transparency settings appeared to reset when reopening the panel due to workspace settings shadowing global configuration.
+- **Core**: Fixed workbench background transparency by injecting CSS rule for `div[role="application"]` via JS.
+
 ## [0.0.3] - 2025-11-23
 
 ### Added
