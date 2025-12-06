@@ -7,6 +7,10 @@
 
 本插件通过在 VS Code 核心文件中注入代码，实现了真正的动态背景支持，并提供了强大的 UI 透明化控制功能，让你在享受动态壁纸的同时，依然保持高效的编码体验。
 
+<img src="assets/preview_1.png" width="600" alt="preview">
+
+<img src="assets/preview_2.png" width="600" alt="preview">
+
 ## ✨ 主要功能
 
 - **Wallpaper Engine 支持**: 直接加载 Steam 创意工坊中的 Web 类型壁纸。
