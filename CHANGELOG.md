@@ -4,6 +4,12 @@ All notable changes to the "vscode-wallpaper-engine" extension will be documente
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.5] - 2025-12-31
+
+### Fixed
+
+- There will be no black background when no editor is active
+
 ## [0.0.4] - 2025-12-06
 
 ### Added

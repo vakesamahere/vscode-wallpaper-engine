@@ -411,7 +411,7 @@ async function injectJs(mediaPath: string, type: WallpaperType, opacity: number,
 
         // [Fix] Force transparent background for workbench container
         const baseStyle = document.createElement('style');
-        baseStyle.textContent = 'div[role="application"] { background: transparent !important; }';
+        baseStyle.textContent = 'div[role="application"] { background: transparent !important; } .active.empty { background: transparent !important; }';
         document.head.appendChild(baseStyle);
 
         // Inject Transparency CSS
